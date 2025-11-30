@@ -9,7 +9,7 @@ This project implements a multi-agent customer-service automation system that de
 - **Multi-agent task allocation, negotiation, and multi-step coordination**
 - **Practical customer service automation** with specialized agent roles
 
-The system showcases how specialized agents collaborate to analyze customer queries, fetch structured data, escalate issues, and produce user-facing responses.
+The system demonstrates how specialized agents collaborate to analyze customer queries, retrieve structured data, escalate issues, and generate user-facing responses.
 
 ---
 
@@ -85,7 +85,7 @@ curl -X POST http://localhost:8000/tools/call \
 
 ### A2A Protocol Compliance ✓
 
-Each agent implements full A2A specification:
+Each agent implements the full A2A specification:
 - **`/agent/card`** endpoint for agent discovery (GET)
 - **`/agent/tasks`** endpoint for task execution (POST)
 - **`/health`** endpoint for service monitoring
@@ -140,7 +140,7 @@ The system implements three core coordination patterns:
 
 ### Scenario 1: Task Allocation
 
-**Query:** "I need help with my account, customer ID 12345"
+**Query:** "I need help with my account, customer ID 12345."
 
 **A2A Flow:**
 1. Router Agent receives query and extracts customer ID
@@ -456,4 +456,3 @@ Potential improvements:
 ## License
 
 This project is created for educational purposes as part of the Applied Generative AI course assignment.
-
