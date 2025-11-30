@@ -94,7 +94,7 @@ def main():
     # Scenario 1: Task Allocation
     run_query(
         app, 
-        "I need help with my account, customer ID 1",
+        "I need help with my account, customer ID 12345",
         "Scenario 1: Task Allocation"
     )
 

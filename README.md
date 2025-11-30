@@ -333,7 +333,7 @@ The system handles the following test scenarios:
 **Expected:** Single agent, straightforward MCP call
 
 ### 2. Coordinated Query
-**Query:** "I'm customer 1 and need help upgrading my account"  
+**Query:** "I'm customer 12345 and need help upgrading my account"  
 **Expected:** Multiple agents coordinate: data fetch + support response
 
 ### 3. Complex Query
@@ -456,10 +456,4 @@ Potential improvements:
 ## License
 
 This project is created for educational purposes as part of the Applied Generative AI course assignment.
-
----
-
-## Contact
-
-For questions or issues, please refer to the course materials or reach out to the course instructor.
 
