@@ -77,30 +77,29 @@ Design a multi-agent system with at least two specialized agents:
                         │
         ┌───────────────┼───────────────┐
         │               │               │
-        v               v               v
-┌───────────────┐ ┌──────────────┐ ┌──────────────┐
-│ Customer Data │ │  Support     │ │   Direct      │
-│ Agent         │ │  Agent       │ │   Path        │
-│ (Specialist)  │ │  (Specialist)│ │               │
-│               │ │              │ │               │
-│ - Accesses DB │ │ - Handles    │ │               │
-│   via MCP     │ │   support    │ │               │
-│ - Retrieves   │ │   queries    │ │               │
-│   customer    │ │ - Escalates  │ │               │
-│   information │ │   issues     │ │               │
-│ - Updates     │ │ - Requests   │ │               │
-│   records     │ │   context    │ │               │
-│ - Handles     │ │   from Data  │ │               │
-│   validation  │ │   Agent      │ │               │
-│               │ │ - Provides   │ │               │
-│               │ │   solutions  │ │               │
-└───────┬───────┘ └───────┬───────┘ └───────────────┘
-        │                 │
-        │                 │
-        │   A2A           │   A2A
-        │                 │
-        │                 │
-        ▼                 ▼
+        v               v               │
+┌───────────────┐ ┌──────────────┐      │
+│ Customer Data │ │  Support     │      │
+│ Agent         │ │  Agent       │      │
+│ (Specialist)  │ │  (Specialist)│      │
+│               │ │              │      │
+│ - Accesses DB │ │ - Handles    │      │
+│   via MCP     │ │   support    │      │
+│ - Retrieves   │ │   queries    │      │
+│   customer    │ │ - Escalates  │      │
+│   information │ │   issues     │      │
+│ - Updates     │ │ - Requests   │      │
+│   records     │ │   context    │      │
+│ - Handles     │ │   from Data  │      │
+│   validation  │ │   Agent      │      │
+│               │ │ - Provides   │      │
+│               │ │   solutions  │      │
+└───────┬───────┘ └───────┬───────┘      │
+        │                 │               │
+        │   A2A           │   A2A         │
+        │                 │               │
+        │                 │               │
+        ▼                 ▼               │
 ┌─────────────────────────────────┐
 │      MCP Server                │
 │      (Database)                │
