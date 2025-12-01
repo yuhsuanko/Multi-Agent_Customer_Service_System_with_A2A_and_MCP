@@ -216,7 +216,7 @@ The agents use LLM backends for intelligent reasoning. You need to configure an 
 ```bash
 export OPENAI_API_KEY="your_openai_api_key_here"
 export LLM_PROVIDER="openai"
-export LLM_MODEL="gpt-3.5-turbo"  # or "gpt-4"
+export LLM_MODEL="gpt-5-nano"  # or "gpt-4"
 ```
 
 **Option 2: Using Anthropic**
