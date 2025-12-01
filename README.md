@@ -226,18 +226,25 @@ export LLM_PROVIDER="anthropic"
 export LLM_MODEL="claude-3-haiku-20240307"
 ```
 
-**Option 3: Using .env file**
-Create a `.env` file in the project root:
-```bash
-OPENAI_API_KEY=your_openai_api_key_here
-LLM_PROVIDER=openai
-LLM_MODEL=gpt-3.5-turbo
-```
+**Option 3: Using .env file (Recommended)**
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
 
-Then install python-dotenv and the system will load it automatically:
-```bash
-pip install python-dotenv
-```
+2. Edit `.env` and add your API key:
+   ```bash
+   OPENAI_API_KEY=your_openai_api_key_here
+   LLM_PROVIDER=openai
+   LLM_MODEL=gpt-3.5-turbo
+   ```
+
+3. Install python-dotenv (if not already installed):
+   ```bash
+   pip install python-dotenv
+   ```
+
+The system will automatically load environment variables from `.env` file.
 
 **Note:** If no API key is configured, the system will use rule-based fallback logic (useful for testing, but agents won't have LLM reasoning capabilities).
 
@@ -398,24 +405,51 @@ The system handles the following test scenarios:
 │   ├── support_agent.py    # Support specialist
 │   ├── graph.py            # LangGraph workflow definition
 │   ├── state.py            # Shared state structure
+│   ├── llm_config.py       # LLM configuration and initialization
 │   └── mcp_client.py       # MCP tool client wrapper
 ├── demo/                   # Demo scripts
 │   └── main.py            # End-to-end demonstration
+├── .env.example            # Environment variables template
 ├── database_setup.py       # Database initialization script
 ├── db_mcp_server.py        # MCP server (FastAPI)
 ├── router_agent_server.py  # Router agent A2A server
 ├── data_agent_server.py    # Data agent A2A server
 ├── support_agent_server.py # Support agent A2A server
-├── mcp_tools.py            # MCP tool implementations
 ├── config.py               # Configuration (URLs, paths)
 ├── requirements.txt        # Python dependencies
 ├── README.md              # This file
+├── QUICKSTART.md          # Quick start guide
+├── PROTOCOLS.md           # Protocol documentation
 └── support.db             # SQLite database (created after setup)
 ```
 
 ---
 
+## Technology Stack
+
+- **LangGraph SDK**: Used for agent orchestration and workflow management
+  - `StateGraph` from `langgraph.graph` for defining multi-agent workflows
+  - Message-based state for A2A compatibility
+  - Conditional routing and edge management
+  - Native workflow compilation and execution
+- **LangChain**: Used for LLM integration (OpenAI, Anthropic)
+  - `ChatOpenAI` and `ChatAnthropic` for LLM backends
+  - Prompt templating and output parsing
+- **FastAPI**: Used for MCP and A2A server endpoints
+- **SQLite**: Database backend for customer and ticket data
+
 ## Key Implementation Details
+
+### LangGraph SDK Usage
+
+This implementation uses **LangGraph SDK** for agent orchestration:
+
+- **Workflow Definition**: Uses `StateGraph` to define the multi-agent workflow
+- **Node Registration**: Each agent is registered as a LangGraph node
+- **Conditional Routing**: Uses `add_conditional_edges()` for scenario-based routing
+- **State Management**: Shared state (`CSState`) passed between agents
+- **Workflow Compilation**: Workflow is compiled using `workflow.compile()`
+- **Execution**: Workflow is invoked using `app.invoke(initial_state)`
 
 ### A2A Message Passing
 
@@ -481,12 +515,13 @@ This project demonstrates:
 
 Potential improvements:
 
-- Add LLM integration for more natural language understanding
-- Implement persistent agent memory/context
+- Enhanced LLM prompts for better intent detection and response quality
+- Implement persistent agent memory/context across sessions
 - Add authentication and rate limiting for production use
 - Support for additional MCP tools (email, notifications, etc.)
 - Web interface for customer interactions
 - Advanced routing based on customer tier/premium status
+- Real-time streaming responses via SSE
 
 ---
 
