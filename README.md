@@ -16,15 +16,35 @@ The system uses **LangGraph SDK directly** in `demo/main.py` to execute the mult
 
 ## System Architecture
 
-### Three Specialized Agents (LLM-Powered)
+### Part 1: System Architecture
 
-All agents use LLM backends for intelligent reasoning and decision-making:
+Design a multi-agent system with at least two specialized agents:
 
-| Agent | Responsibilities | LLM Usage |
-|-------|------------------|-----------|
-| **Router Agent (Orchestrator)** | Receives customer queries, analyzes query intent, routes to appropriate specialist agents, coordinates responses from multiple agents | Uses LLM to detect intents, classify scenarios, and extract entities from natural language queries |
-| **Customer Data Agent (Specialist)** | Accesses customer database via MCP, retrieves customer information, updates customer records, handles data validation | Uses LLM to reason about what data operations are needed based on context |
-| **Support Agent (Specialist)** | Handles general customer support queries, can escalate complex issues, requests customer context from Data Agent, provides solutions and recommendations | Uses LLM to generate natural, context-aware responses based on customer data and scenario |
+#### Router Agent (Orchestrator)
+
+- Receives customer queries
+- Analyzes query intent
+- Routes to appropriate specialist agent
+- Coordinates responses from multiple agents
+
+#### Customer Data Agent (Specialist)
+
+- Accesses customer database via MCP
+- Retrieves customer information
+- Updates customer records
+- Handles data validation
+
+#### Support Agent (Specialist)
+
+- Handles general customer support queries
+- Can escalate complex issues
+- Requests customer context from Data Agent
+- Provides solutions and recommendations
+
+**Note:** All agents use LLM backends for intelligent reasoning and decision-making:
+- Router Agent uses LLM to detect intents, classify scenarios, and extract entities from natural language queries
+- Customer Data Agent uses LLM to reason about what data operations are needed based on context
+- Support Agent uses LLM to generate natural, context-aware responses based on customer data and scenario
 
 **Note:** Agents can work with rule-based fallback logic if no LLM API key is configured, but LLM reasoning is recommended for full functionality.
 
@@ -33,7 +53,7 @@ All agents use LLM backends for intelligent reasoning and decision-making:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    demo/main.py                              │
-│              (Uses LangGraph SDK directly)                   │
+│              (Uses LangGraph SDK)                            │
 │                                                              │
 │  from agents.graph import build_workflow                     │
 │  graph_app = build_workflow()                               │
@@ -46,31 +66,57 @@ All agents use LLM backends for intelligent reasoning and decision-making:
         │   (Orchestrates agents via A2A)    │
         └───────────────┬───────────────────┘
                         │
+                        v
+        ┌───────────────────────────────────┐
+        │   Router Agent (Orchestrator)    │
+        │   - Receives customer queries     │
+        │   - Analyzes query intent         │
+        │   - Routes to specialist agents   │
+        │   - Coordinates responses         │
+        └───────────────┬───────────────────┘
+                        │
         ┌───────────────┼───────────────┐
         │               │               │
         v               v               v
 ┌───────────────┐ ┌──────────────┐ ┌──────────────┐
-│ Router Node   │ │ Data Agent    │ │ Support Agent│
-│ (LLM Analysis)│ │   Server      │ │   Server     │
-│               │ │   (A2A)       │ │   (A2A)      │
-└───────┬───────┘ └───────┬───────┘ └──────┬──────┘
-        │                  │                 │
-        │                  │                 │
-        │ HTTP A2A         │ HTTP A2A        │
-        │ /agent/tasks     │ /agent/tasks    │
-        │                  │                 │
-        │                  ▼                 │
-        │         ┌─────────────────┐       │
-        │         │   MCP Server     │       │
-        │         │   (Database)     │       │
-        │         └─────────────────┘       │
-        │                                     │
-        └─────────────────────────────────────┘
-                        │
-                        v
-        ┌───────────────────────────────┐
-        │      Final Response           │
-        └───────────────────────────────┘
+│ Customer Data │ │  Support     │ │   Direct      │
+│ Agent         │ │  Agent       │ │   Path        │
+│ (Specialist)  │ │  (Specialist)│ │               │
+│               │ │              │ │               │
+│ - Accesses DB │ │ - Handles    │ │               │
+│   via MCP     │ │   support    │ │               │
+│ - Retrieves   │ │   queries    │ │               │
+│   customer    │ │ - Escalates  │ │               │
+│   information │ │   issues     │ │               │
+│ - Updates     │ │ - Requests   │ │               │
+│   records     │ │   context    │ │               │
+│ - Handles     │ │   from Data  │ │               │
+│   validation  │ │   Agent      │ │               │
+│               │ │ - Provides   │ │               │
+│               │ │   solutions  │ │               │
+└───────┬───────┘ └───────┬───────┘ └───────────────┘
+        │                 │
+        │                 │
+        │   A2A           │   A2A
+        │                 │
+        │                 │
+        ▼                 ▼
+┌─────────────────────────────────┐
+│      MCP Server                │
+│      (Database)                │
+│                                │
+│  - get_customer                │
+│  - list_customers              │
+│  - update_customer             │
+│  - create_ticket               │
+│  - get_customer_history         │
+└─────────────────────────────────┘
+        │
+        │
+        v
+┌───────────────────────────────┐
+│      Final Response           │
+└───────────────────────────────┘
 ```
 
 ---
