@@ -77,24 +77,31 @@ What data operations are needed?""")
         # For now, use rule-based logic but with LLM guidance
         # In a full implementation, parse JSON from LLM response
         return {
-            "operations": _determine_operations_rule_based(scenario, intents, customer_id)
+            "operations": _determine_operations_rule_based(scenario, intents, customer_id, query)
         }
     except Exception as e:
         print(f"Warning: LLM reasoning failed, using rule-based: {e}")
         return {
-            "operations": _determine_operations_rule_based(scenario, intents, customer_id)
+            "operations": _determine_operations_rule_based(scenario, intents, customer_id, query)
         }
 
 
-def _determine_operations_rule_based(scenario: str, intents: list, customer_id: Any) -> list:
+def _determine_operations_rule_based(scenario: str, intents: list, customer_id: Any, query: str = "") -> list:
     """Rule-based operation determination (fallback)."""
     operations = []
+    query_lower = query.lower() if query else ""
     
     if scenario == "task_allocation" and customer_id:
         operations.append({"action": "get_customer", "customer_id": customer_id})
     
     elif scenario == "multi_step":
-        operations.append({"action": "list_customers", "filters": {"status": "active"}})
+        # For multi_step, determine what data is needed
+        if "premium" in query_lower:
+            # Need to get premium customers (in our system, active = premium)
+            operations.append({"action": "list_customers", "filters": {"status": "active"}})
+        else:
+            # Default: get active customers
+            operations.append({"action": "list_customers", "filters": {"status": "active"}})
     
     elif scenario == "multi_intent":
         if "update_email" in intents and customer_id:

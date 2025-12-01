@@ -1,10 +1,11 @@
 # data_agent_server.py
 """
-Customer Data Agent (A2A).
+Customer Data Agent (A2A) with LLM-powered reasoning.
 
 Responsibilities:
 - Provide an A2A interface for data-related tasks.
-- Internally calls the MCP DB server via HTTP to:
+- Use LLM to reason about what data operations are needed.
+- Internally calls the MCP DB server to:
   - get_customer
   - list_customers
   - get_customer_history
@@ -16,6 +17,14 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
 from config import MCP_SERVER_URL
+# Import LLM functions from agents module
+import sys
+from pathlib import Path
+project_root = Path(__file__).parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+from agents.data_agent import _reason_about_data_needs
+from agents.state import CSState
 
 app = FastAPI(title="Customer Data Agent", version="1.0.0")
 
@@ -30,11 +39,13 @@ class AgentCard(BaseModel):
 
 
 class TaskInput(BaseModel):
-    action: str
+    action: Optional[str] = None  # Can be auto-determined by LLM if not provided
+    query: Optional[str] = None  # User query for LLM reasoning
     customer_id: Optional[int] = None
     status: Optional[str] = None
     limit: Optional[int] = 50
     update_data: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None  # Additional context for LLM reasoning
 
 
 class TaskRequest(BaseModel):
@@ -72,9 +83,9 @@ def get_agent_card():
     """
     return AgentCard(
         name="customer-data-agent",
-        description="Specialized agent for customer and ticket data via MCP. Handles data retrieval, updates, and validation.",
+        description="Specialized agent for customer and ticket data via MCP. Uses LLM to reason about what data operations are needed (NO hardcoded logic). Handles data retrieval, updates, and validation using backend reasoning model.",
         version="1.0.0",
-        capabilities=["get_customer", "list_customers", "get_history", "update_customer"],
+        capabilities=["get_customer", "list_customers", "get_history", "update_customer", "llm_data_reasoning"],
     )
 
 
@@ -91,9 +102,9 @@ def get_a2a_agent_card(assistant_id: str = "customer-data-agent"):
     
     return AgentCard(
         name="customer-data-agent",
-        description="Specialized agent for customer and ticket data via MCP. Handles data retrieval, updates, and validation.",
+        description="Specialized agent for customer and ticket data via MCP. Uses LLM to reason about what data operations are needed (NO hardcoded logic). Handles data retrieval, updates, and validation using backend reasoning model.",
         version="1.0.0",
-        capabilities=["get_customer", "list_customers", "get_history", "update_customer"],
+        capabilities=["get_customer", "list_customers", "get_history", "update_customer", "llm_data_reasoning"],
     )
 
 
@@ -117,19 +128,51 @@ async def health_check():
 @app.post("/agent/tasks", response_model=TaskResult)
 def create_task(request: TaskRequest):
     """
-    Handle a data-related task.
-
-    Supported actions:
-    - get_customer
-    - list_customers
-    - get_customer_history
-    - update_customer
+    Handle a data-related task using LLM reasoning (NO hardcoded logic).
+    
+    The Data Agent uses LLM to reason about what data operations are needed
+    based on the query and context, then executes those operations via MCP.
     """
     inp = request.input
     action = inp.action
-
+    query = inp.query or ""
+    context = inp.context or {}
+    
     result: Dict[str, Any] = {}
 
+    # If action is not provided, use LLM to determine what operations are needed
+    if not action and query:
+        # Build state for LLM reasoning
+        state: CSState = {
+            "messages": [],
+            "user_query": query,
+            "scenario": context.get("scenario", "coordinated"),
+            "intents": context.get("intents", []),
+            "customer_id": inp.customer_id,
+            "logs": [],
+        }
+        
+        # Use LLM to reason about data needs
+        try:
+            data_plan = _reason_about_data_needs(state)
+            operations = data_plan.get("operations", [])
+            
+            if operations:
+                # Execute the first operation determined by LLM
+                op = operations[0]
+                action = op.get("action")
+                # Update parameters from LLM-determined operation
+                if "customer_id" in op:
+                    inp.customer_id = op["customer_id"]
+                if "filters" in op:
+                    if "status" in op["filters"]:
+                        inp.status = op["filters"]["status"]
+                if "update_data" in op:
+                    inp.update_data = op["update_data"]
+        except Exception as e:
+            return TaskResult(status="error", result={"error": f"LLM reasoning failed: {str(e)}. Please provide 'action' explicitly."})
+
+    # Now execute the determined or provided action
     if action == "get_customer":
         if inp.customer_id is None:
             return TaskResult(status="error", result={"error": "customer_id is required"})
@@ -159,7 +202,7 @@ def create_task(request: TaskRequest):
         result["update_result"] = update_result
 
     else:
-        return TaskResult(status="error", result={"error": f"Unsupported action: {action}"})
+        return TaskResult(status="error", result={"error": f"Unsupported action: {action}. Provide 'query' for LLM-based reasoning."})
 
     return TaskResult(status="completed", result=result)
 

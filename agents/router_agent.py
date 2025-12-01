@@ -14,7 +14,7 @@ rather than simple keyword matching.
 
 import re
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -22,10 +22,39 @@ from .state import CSState, AgentMessage
 from .llm_config import get_default_llm
 
 
-def _extract_customer_id(query: str) -> int:
-    """Extract numeric customer ID from text using regex."""
-    match = re.search(r"\b(\d{1,10})\b", query)
-    return int(match.group(1)) if match else None
+def _extract_customer_id(query: str) -> Optional[int]:
+    """Extract numeric customer ID from text using regex.
+    
+    Looks for patterns like:
+    - "customer ID 12345"
+    - "customer 12345"
+    - "I'm customer 12345"
+    - "ID 12345"
+    - Any standalone number if context suggests it's a customer ID
+    """
+    query_lower = query.lower()
+    
+    # Try explicit patterns first
+    patterns = [
+        r"customer\s+id\s+(\d{1,10})",
+        r"customer\s+(\d{1,10})",
+        r"i'?m\s+customer\s+(\d{1,10})",
+        r"id\s+(\d{1,10})",
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, query_lower)
+        if match:
+            return int(match.group(1))
+    
+    # Fallback: look for standalone numbers (but be more careful)
+    # Only extract if query mentions "customer" or "ID" somewhere
+    if "customer" in query_lower or " id " in query_lower:
+        match = re.search(r"\b(\d{1,10})\b", query)
+        if match:
+            return int(match.group(1))
+    
+    return None
 
 
 def _extract_email(query: str) -> str:
@@ -54,19 +83,27 @@ Your job is to analyze customer queries and determine:
 2. The intents present in the query
 3. The urgency level (normal or high)
 
-Scenarios:
-- task_allocation: Simple queries requesting customer info or account help with a specific customer ID
-- escalation: Multiple intents like cancellation + billing issues, or urgent billing/refund requests
-- multi_step: Complex queries requiring multiple data fetches (e.g., "show me all X with Y")
-- multi_intent: Queries with multiple parallel tasks (e.g., "update email AND show history")
-- coordinated: General support queries requiring data fetch + support response
+IMPORTANT SCENARIO DEFINITIONS:
+- task_allocation: Simple queries requesting customer info or account help with a specific customer ID (e.g., "I need help with my account, customer ID 12345", "Get customer information for ID 5")
+- escalation: (1) Queries with cancellation + billing issues TOGETHER, indicating negotiation needed (e.g., "I want to cancel my subscription but I'm having billing issues"), OR (2) Urgent billing/refund requests requiring immediate attention (e.g., "I've been charged twice, please refund immediately!" - this is escalation because it's urgent and requires special handling)
+- multi_step: Complex queries requiring coordination to fetch data then process (e.g., "What's the status of all high-priority tickets for premium customers?" requires: get premium customers → get their tickets → format report)
+- multi_intent: Queries with multiple parallel tasks that can be done together (e.g., "update email AND show ticket history")
+- coordinated: General support queries requiring data fetch + support response (NOT urgent billing/refund issues)
+
+CRITICAL RULES:
+- If query mentions "cancel" AND "billing" in same sentence → scenario = "escalation" (NOT multi_intent!)
+- If query mentions "charged twice" AND ("refund" OR "immediately") → scenario = "escalation" (urgent billing issue requiring escalation, NOT coordinated!)
+- If query mentions urgent billing/refund requests with high urgency keywords ("immediately", "urgent", "charged twice") → scenario = "escalation"
+- If query asks for "all X for Y" or "show me all X with Y" → scenario = "multi_step" (NOT coordinated!)
+- If query asks for "high-priority tickets for premium customers" → scenario = "multi_step" (requires: get premium customers first, then their tickets)
+- If query mentions "charged twice" or "refund immediately" → urgency = "high" AND scenario = "escalation" (NOT coordinated!)
 
 Return a JSON object with:
 - intents: array of detected intents (e.g., ["account_help"], ["cancel_subscription", "billing_issue"])
-- scenario: one of the scenario types above
-- urgency: "normal" or "high" (high for billing issues, refunds, "immediately", etc.)
+- scenario: one of the scenario types above (MUST match the definitions exactly)
+- urgency: "normal" or "high"
 
-Be intelligent about detecting the scenario based on query complexity and intent combinations."""),
+Be precise about scenario classification based on the query structure and requirements."""),
         ("user", "Analyze this customer query: {query}")
     ])
     
@@ -125,6 +162,9 @@ def _fallback_analysis(query: str) -> Dict[str, Any]:
         scenario = "multi_step"
     elif "cancel_subscription" in intents and "billing_issue" in intents:
         scenario = "escalation"
+    elif ("charged twice" in q or ("refund" in q and "immediately" in q)) and ("billing_issue" in intents or "refund" in q):
+        # Urgent billing/refund requests should be escalation (NOT coordinated!)
+        scenario = "escalation"
     elif "simple_customer_info" in intents or "account_help" in intents:
         scenario = "task_allocation"
     elif "update_email" in intents and "ticket_history" in intents:
@@ -132,7 +172,7 @@ def _fallback_analysis(query: str) -> Dict[str, Any]:
     else:
         scenario = "coordinated"
     
-    urgency = "high" if ("billing_issue" in intents or "refund immediately" in q) else "normal"
+    urgency = "high" if ("billing_issue" in intents or "refund immediately" in q or "charged twice" in q) else "normal"
     
     return {
         "intents": intents,

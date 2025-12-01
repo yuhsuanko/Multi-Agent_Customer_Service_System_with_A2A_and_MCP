@@ -4,12 +4,13 @@
 
 This project implements a multi-agent customer-service automation system that demonstrates:
 
+- **LangGraph SDK** for agent orchestration and workflow management
 - **Agent-to-Agent (A2A) coordination** using LangGraph's message-based communication
 - **Model Context Protocol (MCP)** integration for structured data access
 - **Multi-agent task allocation, negotiation, and multi-step coordination**
 - **Practical customer service automation** with specialized agent roles
 
-The system demonstrates how specialized agents collaborate to analyze customer queries, retrieve structured data, escalate issues, and generate user-facing responses.
+The system uses **LangGraph SDK directly** in `demo/main.py` to execute the multi-agent workflow. The workflow orchestrates agents that communicate via A2A protocol, demonstrating how specialized agents collaborate to analyze customer queries, retrieve structured data, escalate issues, and generate user-facing responses.
 
 ---
 
@@ -31,32 +32,45 @@ All agents use LLM backends for intelligent reasoning and decision-making:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      User Query                              │
+│                    demo/main.py                              │
+│              (Uses LangGraph SDK directly)                   │
+│                                                              │
+│  from agents.graph import build_workflow                     │
+│  graph_app = build_workflow()                               │
+│  final_state = graph_app.invoke(initial_state)               │
 └───────────────────────┬─────────────────────────────────────┘
                         │
                         v
-            ┌───────────────────────┐
-            │   Router Agent        │
-            │   (Orchestrator)      │
-            │  - Intent Detection   │
-            │  - Scenario Analysis  │
-            │  - Entity Extraction  │
-            └───────┬───────────────┘
-                    │
-        ┌───────────┼───────────┐
-        │           │           │
-        v           v           v
-┌─────────────┐ ┌──────────────┐ ┌─────────────┐
-│ Data Agent  │ │ Support Agent│ │   Direct    │
-│   (MCP)     │ │   (MCP)      │ │   Path      │
-└──────┬──────┘ └──────┬───────┘ └─────────────┘
-       │                │
-       └────────┬───────┘
-                │
-                v
-        ┌───────────────┐
-        │ Final Response│
-        └───────────────┘
+        ┌───────────────────────────────────┐
+        │   LangGraph Workflow (StateGraph) │
+        │   (Orchestrates agents via A2A)    │
+        └───────────────┬───────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        │               │               │
+        v               v               v
+┌───────────────┐ ┌──────────────┐ ┌──────────────┐
+│ Router Node   │ │ Data Agent    │ │ Support Agent│
+│ (LLM Analysis)│ │   Server      │ │   Server     │
+│               │ │   (A2A)       │ │   (A2A)      │
+└───────┬───────┘ └───────┬───────┘ └──────┬──────┘
+        │                  │                 │
+        │                  │                 │
+        │ HTTP A2A         │ HTTP A2A        │
+        │ /agent/tasks     │ /agent/tasks    │
+        │                  │                 │
+        │                  ▼                 │
+        │         ┌─────────────────┐       │
+        │         │   MCP Server     │       │
+        │         │   (Database)     │       │
+        │         └─────────────────┘       │
+        │                                     │
+        └─────────────────────────────────────┘
+                        │
+                        v
+        ┌───────────────────────────────┐
+        │      Final Response           │
+        └───────────────────────────────┘
 ```
 
 ---
@@ -92,14 +106,15 @@ curl -X POST http://localhost:8000/tools/call \
 Each agent implements the full A2A specification:
 - **`/agent/card`** endpoint for agent discovery (GET)
 - **`/agent/tasks`** endpoint for task execution (POST)
+- **`/a2a/{assistant_id}`** endpoint for LangGraph A2A compatibility (GET)
 - **`/health`** endpoint for service monitoring
 - Independent agent services that communicate via A2A protocol
 - Agents discover and communicate with each other using standardized endpoints
 
 **Agent Endpoints:**
-- Router Agent: `http://localhost:8001/agent/card`, `/agent/tasks`
-- Data Agent: `http://localhost:8002/agent/card`, `/agent/tasks`
-- Support Agent: `http://localhost:8003/agent/card`, `/agent/tasks`
+- Router Agent: `http://localhost:8001/agent/card`, `/agent/tasks`, `/a2a/router-agent`
+- Data Agent: `http://localhost:8002/agent/card`, `/agent/tasks`, `/a2a/customer-data-agent`
+- Support Agent: `http://localhost:8003/agent/card`, `/agent/tasks`, `/a2a/support-agent`
 
 See `PROTOCOLS.md` for detailed protocol specifications and testing procedures.
 
@@ -272,24 +287,37 @@ python -c "from agents.graph import build_workflow; print('Setup successful!')"
 
 ## Usage
 
-### Option 1: Local LangGraph Demo (Recommended for Testing)
+### Running the Demo (Using LangGraph SDK)
 
-Run the end-to-end demo that uses a local LangGraph workflow:
+The demo script (`demo/main.py`) **directly uses LangGraph SDK** to execute the multi-agent workflow:
 
 ```bash
 python demo/main.py
 ```
 
-This will execute all test scenarios and display:
+**How it works:**
+1. Imports LangGraph SDK: `from agents.graph import build_workflow`
+2. Builds the workflow: `graph_app = build_workflow()`
+3. Creates initial state with `messages` key (required for LangGraph A2A)
+4. Executes workflow: `graph_app.invoke(initial_state)`
+5. LangGraph workflow orchestrates agents that communicate via A2A protocol
+
+**Prerequisites:**
+- MCP Server must be running (port 8000)
+- Data Agent Server must be running (port 8002)
+- Support Agent Server must be running (port 8003)
+- **Note:** Router Agent Server is NOT required as we use LangGraph SDK directly
+
+**What the demo displays:**
 - User queries
 - Detected scenarios and intents
 - Agent-to-agent communication logs
 - A2A messages
 - Final responses
 
-### Option 2: Distributed A2A Services (Production-like)
+### Starting Required Services
 
-For a production-like setup with separate services using **proper MCP and A2A protocols**:
+Before running the demo, start the required services:
 
 #### Terminal 1: Start MCP Server
 ```bash
@@ -304,22 +332,25 @@ python db_mcp_server.py
 python data_agent_server.py
 ```
 - Server runs on `http://localhost:8002`
-- A2A endpoints: `/agent/card`, `/agent/tasks`, `/health`
+- A2A endpoints: `/agent/card`, `/agent/tasks`, `/a2a/{assistant_id}`, `/health`
 
 #### Terminal 3: Start Support Agent (A2A)
 ```bash
 python support_agent_server.py
 ```
 - Server runs on `http://localhost:8003`
-- A2A endpoints: `/agent/card`, `/agent/tasks`, `/health`
+- A2A endpoints: `/agent/card`, `/agent/tasks`, `/a2a/{assistant_id}`, `/health`
 
-#### Terminal 4: Start Router Agent (A2A)
+#### Optional: Router Agent Server (for HTTP A2A access)
+
+If you want to access Router Agent via HTTP A2A (instead of using LangGraph SDK directly):
+
 ```bash
 python router_agent_server.py
 ```
 - Server runs on `http://localhost:8001`
-- A2A endpoints: `/agent/card`, `/agent/tasks`, `/health`
-- Orchestrates other agents via A2A protocol
+- A2A endpoints: `/agent/card`, `/agent/tasks`, `/a2a/{assistant_id}`, `/health`
+- Orchestrates other agents via A2A protocol using LangGraph SDK internally
 
 #### Verify Protocol Compliance
 
@@ -337,17 +368,23 @@ curl -X POST http://localhost:8000/tools/call \
 **Test A2A Agents:**
 ```bash
 # Get agent cards (discovery)
-curl http://localhost:8001/agent/card  # Router
+curl http://localhost:8001/agent/card  # Router (if running)
 curl http://localhost:8002/agent/card  # Data Agent
 curl http://localhost:8003/agent/card  # Support Agent
 
+# Get agent cards via A2A endpoint
+curl http://localhost:8002/a2a/customer-data-agent
+curl http://localhost:8003/a2a/support-agent
+
 # Check health
-curl http://localhost:8001/health
+curl http://localhost:8001/health  # Router (if running)
 curl http://localhost:8002/health
 curl http://localhost:8003/health
 ```
 
-#### Execute Query via A2A
+#### Execute Query via HTTP A2A (Optional)
+
+If Router Agent Server is running, you can also call it via HTTP:
 
 ```bash
 curl -X POST http://localhost:8001/agent/tasks \
@@ -360,7 +397,7 @@ curl -X POST http://localhost:8001/agent/tasks \
 ```
 
 The Router Agent will:
-1. Analyze the query
+1. Use LangGraph SDK internally to orchestrate workflow
 2. Call Data Agent via A2A (`/agent/tasks`)
 3. Data Agent calls MCP Server (`/tools/call`)
 4. Router calls Support Agent via A2A
@@ -429,13 +466,16 @@ The system handles the following test scenarios:
 
 - **LangGraph SDK**: Used for agent orchestration and workflow management
   - `StateGraph` from `langgraph.graph` for defining multi-agent workflows
-  - Message-based state for A2A compatibility
+  - Message-based state for A2A compatibility (must have `messages` key)
   - Conditional routing and edge management
   - Native workflow compilation and execution
+  - **Used directly in `demo/main.py`** and internally in Router Agent Server
 - **LangChain**: Used for LLM integration (OpenAI, Anthropic)
   - `ChatOpenAI` and `ChatAnthropic` for LLM backends
   - Prompt templating and output parsing
 - **FastAPI**: Used for MCP and A2A server endpoints
+  - MCP Server: `/sse`, `/tools/list`, `/tools/call`
+  - Agent Servers: `/agent/card`, `/agent/tasks`, `/a2a/{assistant_id}`, `/health`
 - **SQLite**: Database backend for customer and ticket data
 
 ## Key Implementation Details
@@ -450,6 +490,33 @@ This implementation uses **LangGraph SDK** for agent orchestration:
 - **State Management**: Shared state (`CSState`) passed between agents
 - **Workflow Compilation**: Workflow is compiled using `workflow.compile()`
 - **Execution**: Workflow is invoked using `app.invoke(initial_state)`
+
+**Key Implementation:**
+- `demo/main.py` directly uses LangGraph SDK: `from agents.graph import build_workflow`
+- Router Agent Server also uses LangGraph SDK internally for orchestration
+- Both use the same workflow definition from `agents/graph.py`
+
+### LangGraph A2A Compatibility
+
+The system implements LangGraph's A2A requirements:
+
+- **Message-based State**: All states include a `messages` list (required for LangGraph A2A)
+  ```python
+  initial_state: CSState = {
+      "messages": [],  # Required for LangGraph A2A compatibility
+      "user_query": query,
+      "logs": [],
+  }
+  ```
+
+- **Agent Card Endpoints**: Each agent exposes `/a2a/{assistant_id}` endpoint
+  - Router Agent: `/a2a/router-agent`
+  - Data Agent: `/a2a/customer-data-agent`
+  - Support Agent: `/a2a/support-agent`
+
+- **A2A Communication**: Agents discover and communicate via HTTP A2A protocol
+  - Agents can discover each other by calling `/a2a/{assistant_id}`
+  - Agents communicate via `/agent/tasks` endpoint using HTTP + JSON
 
 ### A2A Message Passing
 

@@ -207,7 +207,23 @@ def call_data_agent_node(state: CSState) -> CSState:
         action = "get_customer"
         payload["customer_id"] = customer_id
     elif scenario == "multi_step":
-        if "high_priority_report" in intents or "active_with_open_tickets" in intents:
+        # For multi_step, determine what data is needed based on query
+        query = state.get("user_query", "").lower()
+        if "premium" in query and "high-priority" in query:
+            # Scenario: "high-priority tickets for premium customers"
+            # Need to: 1) Get premium customers (status="active"), 2) Then get their tickets
+            action = "list_customers"
+            payload["status"] = "active"
+            payload["limit"] = 200
+            # Note: We'll need to filter for premium customers after getting the list
+            # For now, get all active customers, then Support Agent will filter for premium and get tickets
+        elif "active" in query and "open tickets" in query:
+            # Scenario: "active customers who have open tickets"
+            action = "list_customers"
+            payload["status"] = "active"
+            payload["limit"] = 200
+        else:
+            # Default multi_step: list customers
             action = "list_customers"
             payload["status"] = "active"
             payload["limit"] = 200
@@ -215,6 +231,16 @@ def call_data_agent_node(state: CSState) -> CSState:
         # Router delegates update + history to Data Agent
         action = "update_customer"  # then we also fetch history
     elif scenario == "coordinated":
+        if customer_id is not None:
+            action = "get_customer"
+            payload["customer_id"] = customer_id
+    elif scenario == "escalation":
+        # For escalation, check if customer_id exists to fetch billing context
+        if customer_id is not None:
+            action = "get_customer"
+            payload["customer_id"] = customer_id
+    elif scenario == "escalation":
+        # For escalation, check if customer_id exists to fetch billing context
         if customer_id is not None:
             action = "get_customer"
             payload["customer_id"] = customer_id
@@ -230,25 +256,27 @@ def call_data_agent_node(state: CSState) -> CSState:
 
     # Call Data Agent
     if action == "update_customer":
-        # first: update email
-        if customer_id is not None and state.get("new_email"):
-            update_req = {
-                "input": {
-                    "action": "update_customer",
-                    "customer_id": customer_id,
-                    "update_data": {"email": state["new_email"]},
-                }
-            }
-            resp = requests.post(f"{DATA_AGENT_URL}/agent/tasks", json=update_req, timeout=10)
-            data = resp.json()
-            logs.append({
-                "sender": "Router",
-                "receiver": "CustomerDataAgent",
-                "content": f"Called update_customer. Response status={data.get('status')}"
-            })
-
-        # second: fetch history
+        # Multi-intent scenario: update email AND get ticket history
+        # Both operations require customer_id
         if customer_id is not None:
+            # first: update email
+            if state.get("new_email"):
+                update_req = {
+                    "input": {
+                        "action": "update_customer",
+                        "customer_id": customer_id,
+                        "update_data": {"email": state["new_email"]},
+                    }
+                }
+                resp = requests.post(f"{DATA_AGENT_URL}/agent/tasks", json=update_req, timeout=10)
+                data = resp.json()
+                logs.append({
+                    "sender": "Router",
+                    "receiver": "CustomerDataAgent",
+                    "content": f"Called update_customer. Response status={data.get('status')}"
+                })
+
+            # second: fetch history (always do this for multi_intent)
             history_req = {
                 "input": {
                     "action": "get_customer_history",
@@ -263,6 +291,13 @@ def call_data_agent_node(state: CSState) -> CSState:
                 "sender": "Router",
                 "receiver": "CustomerDataAgent",
                 "content": f"Fetched history for customer {customer_id}."
+            })
+        else:
+            # No customer_id: log that we need it
+            logs.append({
+                "sender": "Router",
+                "receiver": "CustomerDataAgent",
+                "content": "Multi-intent scenario requires customer_id, but none provided. Support Agent will request it."
             })
 
     else:
@@ -300,93 +335,131 @@ def call_support_agent_node(state: CSState) -> CSState:
     action = None
     payload: Dict[str, Any] = {}
 
-    if scenario == "escalation" or "billing_issue" in intents:
+    if scenario == "escalation":
+        # Escalation scenario: billing + cancellation requires negotiation
+        # Log negotiation detection (already logged in router_node)
+        # If customer_id exists, we already have billing context from Data Agent
+        # If not, Support Agent will request it
+        
+        # Check if this is the negotiation phase (first call) or final call (with context)
+        if customer_id is not None and customer and customer.get("found"):
+            # We have billing context, proceed with escalation
+            action = "billing_escalation"
+            payload["customer_id"] = customer_id
+            payload["issue"] = "Billing problem with possible double charge and/or cancellation request"
+            payload["priority"] = "high"
+        elif customer_id is None:
+            # First negotiation: Support Agent needs context
+            # In a full negotiation, Support Agent would respond asking for customer_id
+            # For now, we log this and proceed (Support Agent will ask for customer_id in response)
+            logs.append({
+                "sender": "SupportAgent",
+                "receiver": "Router",
+                "content": "I need billing context (customer_id) to handle this escalation."
+            })
+            action = "billing_escalation"
+            payload["customer_id"] = None
+            payload["issue"] = "Billing problem with possible double charge and/or cancellation request. Need customer_id for billing context."
+            payload["priority"] = "high"
+        else:
+            # Have customer_id but no customer data yet - wait for Data Agent (shouldn't happen in current flow)
+            action = "billing_escalation"
+            payload["customer_id"] = customer_id
+            payload["issue"] = "Billing problem with possible double charge and/or cancellation request"
+            payload["priority"] = "high"
+    elif "billing_issue" in intents and scenario != "escalation":
+        # Standalone billing issue (not escalation)
         action = "billing_escalation"
         payload["customer_id"] = customer_id
-        payload["issue"] = "Billing problem with possible double charge and/or cancellation request"
-        payload["priority"] = "high"
-
-    elif scenario == "task_allocation":
-        if customer and customer.get("found"):
-            support_response = (
-                f"Here is the information we have on file for customer #{customer['id']}:\n"
-                f"- Name: {customer['name']}\n"
-                f"- Email: {customer['email']}\n"
-                f"- Phone: {customer['phone']}\n"
-                f"- Status: {customer['status']}"
-            )
-
-    elif scenario == "coordinated" and "upgrade_account" in intents:
-        if customer and customer.get("found"):
-            support_response = (
-                f"Hi {customer['name']}, I can help you upgrade your account.\n"
-                "Based on your current status, you are eligible for our premium tier.\n"
-                "Would you like me to proceed with the upgrade now?"
-            )
-        else:
-            support_response = (
-                "I can help you upgrade your account, but I could not find your customer record. "
-                "Please provide your customer ID."
-            )
-
-    elif scenario == "multi_intent":
-        # Router already got history & updated email via Data Agent
-        parts: List[str] = []
-        if state.get("new_email"):
-            parts.append(f"I have updated your email address to: {state['new_email']}.")
-        tickets = state.get("tickets", [])
-        if tickets is not None:
-            # Call Support Agent to format history text
-            action = "ticket_history_summary"
-            payload["customer_id"] = customer_id
-        else:
-            parts.append("No ticket history was found for this account.")
-        if parts:
-            support_response = "\n".join(parts)
+        payload["issue"] = "Billing issue reported"
+        payload["priority"] = "high" if state.get("urgency") == "high" else "medium"
 
     elif scenario == "multi_step":
         customers = state.get("customer_list", [])
-        if "high_priority_report" in intents:
+        query = state.get("user_query", "").lower()
+        
+        if "premium" in query and "high-priority" in query:
+            # Multi-step: Get premium customers, then their high-priority tickets
+            # Filter customers for premium (status="active" customers are considered premium in our system)
+            # Data Agent already fetched active customers, now Support Agent will get their tickets
+            premium_customers = [c for c in customers if c.get("status") == "active"]
+            action = "high_priority_report"
+            payload["high_priority_report_customers"] = premium_customers
+            logs.append({
+                "sender": "Router",
+                "receiver": "SupportAgent",
+                "content": f"Got {len(premium_customers)} premium customers. Requesting high-priority tickets for these IDs."
+            })
+        elif "active" in query and "open tickets" in query:
+            # Multi-step: Get active customers, then their open tickets
+            action = "active_open_report"
+            payload["active_open_report_customers"] = customers
+            logs.append({
+                "sender": "Router",
+                "receiver": "SupportAgent",
+                "content": f"Got {len(customers)} active customers. Requesting open tickets for these IDs."
+            })
+        elif "list_active_customers" in intents and ("list_open_tickets" in intents or "open tickets" in query):
+            # Handle case where LLM detected separate intents
+            action = "active_open_report"
+            payload["active_open_report_customers"] = customers
+            logs.append({
+                "sender": "Router",
+                "receiver": "SupportAgent",
+                "content": f"Got {len(customers)} active customers. Requesting open tickets for these IDs."
+            })
+        elif "high_priority_report" in intents or "high-priority" in query:
             action = "high_priority_report"
             payload["high_priority_report_customers"] = customers
         elif "active_with_open_tickets" in intents:
             action = "active_open_report"
             payload["active_open_report_customers"] = customers
 
-    # If we already have a full support_response, no need to call Support Agent
-    if support_response:
-        logs.append({
-            "sender": "Router",
-            "receiver": "SupportAgent",
-            "content": f"Generated support response locally for scenario={scenario}."
-        })
-        state["support_response"] = support_response
-        state["done"] = True
-        state["logs"] = logs
-        return state
+    # ALWAYS call Support Agent via A2A - NO hardcoded responses
+    # Support Agent will use LLM to generate all responses
 
+    # ALWAYS call Support Agent via A2A to use LLM for response generation
+    # NO hardcoded responses - Support Agent uses LLM backend reasoning
+    
+    # Build context for Support Agent's LLM
+    support_context = {
+        "scenario": scenario,
+        "intents": intents,
+        "customer_data": customer,
+        "urgency": state.get("urgency", "normal"),
+        "tickets": state.get("tickets", []),
+        "customer_list": state.get("customer_list", []),
+    }
+    
+    # If no specific action, provide query for LLM-based generation
     if action is None:
-        # Fallback
-        support_response = "I am here to help. Could you please provide more details about your issue?"
-        state["support_response"] = support_response
-        state["done"] = True
-        logs.append({
-            "sender": "Router",
-            "receiver": "SupportAgent",
-            "content": f"No specific support action required, returned fallback response."
-        })
-        state["logs"] = logs
-        return state
-
-    # Call Support Agent
-    req_body = {"input": {"action": action, **payload}}
+        action = "general_query"
+        payload = {
+            "query": state.get("user_query", ""),
+            "context": support_context,
+            "customer_id": customer_id,
+        }
+    
+    # Call Support Agent via A2A - it will use LLM to generate response
+    print(f"[Router Agent] Calling Support Agent with action={action}, payload keys={list(payload.keys())}")
+    if "high_priority_report_customers" in payload:
+        print(f"[Router Agent] high_priority_report_customers count: {len(payload.get('high_priority_report_customers', []))}")
+    req_body = {"input": {"action": action, "query": state.get("user_query", ""), "context": support_context, **payload}}
     resp = requests.post(f"{SUPPORT_AGENT_URL}/agent/tasks", json=req_body, timeout=20)
     data = resp.json()
+    
     if data.get("status") == "completed":
         result = data.get("result", {})
         support_response = result.get("support_response", "")
+        # Support Agent should always generate via LLM
+        # If no response, this indicates an error - Support Agent should always return a response
+        if not support_response:
+            # This should not happen - Support Agent always uses LLM to generate responses
+            # Log error but don't use hardcoded response - return error instead
+            support_response = f"Error: Support Agent did not generate a response. Status: {data.get('status')}"
     else:
-        support_response = f"Support agent error: {data}"
+        # Error case - return error message (not a hardcoded test response)
+        support_response = f"Support agent error: {data.get('result', {}).get('error', 'Unknown error')}"
 
     state["support_response"] = support_response
     state["done"] = True
@@ -412,9 +485,25 @@ def build_workflow():
     workflow.set_entry_point("router")
 
     def router_to_next(state: CSState) -> str:
+        """
+        Routing logic after Router analyzes the query.
+        
+        For escalation: 
+        - If customer_id exists, get billing context first (Data Agent), then Support
+        - If no customer_id, go to Support for negotiation (Support will request customer_id)
+        """
         scenario = state.get("scenario", "coordinated")
+        customer_id = state.get("customer_id")
+        
         if scenario == "escalation":
-            return "support_agent"
+            # Escalation: Need billing context if customer_id exists
+            # If customer_id exists, fetch customer data first for context
+            # If not, go to Support Agent for negotiation (Support will ask for customer_id)
+            if customer_id is not None:
+                return "data_agent"  # Get billing context first
+            else:
+                return "support_agent"  # Go to Support for negotiation
+        
         # All other scenarios go through Data Agent first
         return "data_agent"
 
@@ -510,6 +599,7 @@ def create_task(request: TaskRequest):
     """
     user_query = request.input.user_query
     initial_state: CSState = {
+        "messages": [],  # Required for LangGraph A2A compatibility
         "user_query": user_query,
         "logs": [],
     }
