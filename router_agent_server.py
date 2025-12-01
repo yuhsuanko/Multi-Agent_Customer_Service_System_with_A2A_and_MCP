@@ -21,6 +21,8 @@ from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, END
 
 from config import DATA_AGENT_URL, SUPPORT_AGENT_URL
+# Import LLM-based analysis from agents module
+from agents.router_agent import _analyze_query_with_llm, _extract_customer_id, _extract_email
 
 app = FastAPI(title="Router Agent", version="1.0.0")
 
@@ -124,30 +126,64 @@ def detect_scenario(intents: List[str]) -> str:
 # ---------- LangGraph nodes ----------
 
 def router_node(state: CSState) -> CSState:
+    """
+    Router node with LLM-powered query analysis.
+    Uses LLM for intelligent intent detection and scenario classification.
+    """
     logs = state.get("logs", [])
+    messages = state.get("messages", [])
+    
     if "intents" not in state or "scenario" not in state:
         q = state["user_query"]
-        customer_id = extract_customer_id(q)
-        new_email = extract_email(q)
-        intents = detect_intents(q)
-        scenario = detect_scenario(intents)
+        
+        # Extract entities using regex (more reliable than LLM for structured data)
+        customer_id = _extract_customer_id(q)
+        new_email = _extract_email(q)
+        
+        # Use LLM for intelligent intent detection and scenario classification
+        llm_analysis = _analyze_query_with_llm(q)
+        
+        intents = llm_analysis["intents"]
+        scenario = llm_analysis["scenario"]
+        urgency = llm_analysis.get("urgency", "normal")
+        
+        # Override urgency if query contains urgency keywords
+        if "refund immediately" in q.lower() or "charged twice" in q.lower():
+            urgency = "high"
 
         state["customer_id"] = customer_id
         state["new_email"] = new_email
         state["intents"] = intents
         state["scenario"] = scenario
+        state["urgency"] = urgency
+        
+        # Add message for A2A compatibility
+        analysis_msg = (
+            f"Router analyzed query (using LLM): Scenario={scenario}, "
+            f"intents={intents}, customer_id={customer_id}, urgency={urgency}"
+        )
+        messages.append({
+            "role": "assistant",
+            "name": "Router",
+            "content": analysis_msg
+        })
 
-        if "billing_issue" in intents or "charged twice" in q.lower() or "refund immediately" in q.lower():
-            state["urgency"] = "high"
-        else:
-            state["urgency"] = "normal"
-
-        logs.append(AgentMessage(
-            sender="Router",
-            receiver="Router",
-            content=f"Parsed query. Scenario={scenario}, intents={intents}, "
-                    f"customer_id={customer_id}, new_email={new_email}, urgency={state['urgency']}"
-        ))
+        logs.append({
+            "sender": "Router",
+            "receiver": "Router",
+            "content": f"Parsed query using LLM. Scenario={scenario}, intents={intents}, "
+                       f"customer_id={customer_id}, new_email={new_email}, urgency={urgency}"
+        })
+        
+        # For Scenario 2 (escalation): Log negotiation detection
+        if scenario == "escalation":
+            logs.append({
+                "sender": "Router",
+                "receiver": "SupportAgent",
+                "content": "Router detected multiple intents (cancellation + billing). Can you handle this?"
+            })
+    
+    state["messages"] = messages
     state["logs"] = logs
     return state
 
@@ -184,11 +220,11 @@ def call_data_agent_node(state: CSState) -> CSState:
             payload["customer_id"] = customer_id
 
     if action is None:
-        logs.append(AgentMessage(
-            sender="Router",
-            receiver="CustomerDataAgent",
-            content=f"No specific data action required for scenario={scenario}"
-        ))
+        logs.append({
+            "sender": "Router",
+            "receiver": "CustomerDataAgent",
+            "content": f"No specific data action required for scenario={scenario}"
+        })
         state["logs"] = logs
         return state
 
@@ -205,11 +241,11 @@ def call_data_agent_node(state: CSState) -> CSState:
             }
             resp = requests.post(f"{DATA_AGENT_URL}/agent/tasks", json=update_req, timeout=10)
             data = resp.json()
-            logs.append(AgentMessage(
-                sender="Router",
-                receiver="CustomerDataAgent",
-                content=f"Called update_customer. Response status={data.get('status')}"
-            ))
+            logs.append({
+                "sender": "Router",
+                "receiver": "CustomerDataAgent",
+                "content": f"Called update_customer. Response status={data.get('status')}"
+            })
 
         # second: fetch history
         if customer_id is not None:
@@ -223,11 +259,11 @@ def call_data_agent_node(state: CSState) -> CSState:
             data = resp.json()
             if data.get("status") == "completed":
                 state["tickets"] = data["result"].get("history", [])
-            logs.append(AgentMessage(
-                sender="Router",
-                receiver="CustomerDataAgent",
-                content=f"Fetched history for customer {customer_id}."
-            ))
+            logs.append({
+                "sender": "Router",
+                "receiver": "CustomerDataAgent",
+                "content": f"Fetched history for customer {customer_id}."
+            })
 
     else:
         req_body = {"input": {"action": action, **payload}}
@@ -239,11 +275,11 @@ def call_data_agent_node(state: CSState) -> CSState:
                 state["customer_data"] = result["customer"]
             if "customers" in result:
                 state["customer_list"] = result["customers"]
-        logs.append(AgentMessage(
-            sender="Router",
-            receiver="CustomerDataAgent",
-            content=f"Called Data Agent action={action}, response_status={data.get('status')}"
-        ))
+        logs.append({
+            "sender": "Router",
+            "receiver": "CustomerDataAgent",
+            "content": f"Called Data Agent action={action}, response_status={data.get('status')}"
+        })
 
     state["logs"] = logs
     return state
@@ -319,11 +355,11 @@ def call_support_agent_node(state: CSState) -> CSState:
 
     # If we already have a full support_response, no need to call Support Agent
     if support_response:
-        logs.append(AgentMessage(
-            sender="Router",
-            receiver="SupportAgent",
-            content=f"Generated support response locally for scenario={scenario}."
-        ))
+        logs.append({
+            "sender": "Router",
+            "receiver": "SupportAgent",
+            "content": f"Generated support response locally for scenario={scenario}."
+        })
         state["support_response"] = support_response
         state["done"] = True
         state["logs"] = logs
@@ -334,11 +370,11 @@ def call_support_agent_node(state: CSState) -> CSState:
         support_response = "I am here to help. Could you please provide more details about your issue?"
         state["support_response"] = support_response
         state["done"] = True
-        logs.append(AgentMessage(
-            sender="Router",
-            receiver="SupportAgent",
-            content=f"No specific support action required, returned fallback response."
-        ))
+        logs.append({
+            "sender": "Router",
+            "receiver": "SupportAgent",
+            "content": f"No specific support action required, returned fallback response."
+        })
         state["logs"] = logs
         return state
 
@@ -355,11 +391,11 @@ def call_support_agent_node(state: CSState) -> CSState:
     state["support_response"] = support_response
     state["done"] = True
 
-    logs.append(AgentMessage(
-        sender="Router",
-        receiver="SupportAgent",
-        content=f"Called Support Agent action={action}, response_status={data.get('status')}"
-    ))
+    logs.append({
+        "sender": "Router",
+        "receiver": "SupportAgent",
+        "content": f"Called Support Agent action={action}, response_status={data.get('status')}"
+    })
     state["logs"] = logs
     return state
 

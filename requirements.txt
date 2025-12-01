@@ -1,8 +1,13 @@
+google-adk>=0.1.0
 langgraph>=0.2.0
+langchain>=0.1.0
 langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langchain-anthropic>=0.1.0
 typing_extensions>=4.8.0
 regex>=2023.0.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 requests>=2.31.0
 pydantic>=2.5.0
+python-dotenv>=1.0.0

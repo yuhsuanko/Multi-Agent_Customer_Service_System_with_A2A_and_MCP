@@ -15,13 +15,17 @@ The system demonstrates how specialized agents collaborate to analyze customer q
 
 ## System Architecture
 
-### Three Specialized Agents
+### Three Specialized Agents (LLM-Powered)
 
-| Agent | Responsibilities |
-|-------|------------------|
-| **Router Agent (Orchestrator)** | Receives customer queries, analyzes query intent, routes to appropriate specialist agents, coordinates responses from multiple agents |
-| **Customer Data Agent (Specialist)** | Accesses customer database via MCP, retrieves customer information, updates customer records, handles data validation |
-| **Support Agent (Specialist)** | Handles general customer support queries, can escalate complex issues, requests customer context from Data Agent, provides solutions and recommendations |
+All agents use LLM backends for intelligent reasoning and decision-making:
+
+| Agent | Responsibilities | LLM Usage |
+|-------|------------------|-----------|
+| **Router Agent (Orchestrator)** | Receives customer queries, analyzes query intent, routes to appropriate specialist agents, coordinates responses from multiple agents | Uses LLM to detect intents, classify scenarios, and extract entities from natural language queries |
+| **Customer Data Agent (Specialist)** | Accesses customer database via MCP, retrieves customer information, updates customer records, handles data validation | Uses LLM to reason about what data operations are needed based on context |
+| **Support Agent (Specialist)** | Handles general customer support queries, can escalate complex issues, requests customer context from Data Agent, provides solutions and recommendations | Uses LLM to generate natural, context-aware responses based on customer data and scenario |
+
+**Note:** Agents can work with rule-based fallback logic if no LLM API key is configured, but LLM reasoning is recommended for full functionality.
 
 ### Architecture Diagram
 
@@ -204,7 +208,40 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Step 3: Set Up the Database
+### Step 3: Configure LLM (Required for Agent Reasoning)
+
+The agents use LLM backends for intelligent reasoning. You need to configure an API key:
+
+**Option 1: Using OpenAI**
+```bash
+export OPENAI_API_KEY="your_openai_api_key_here"
+export LLM_PROVIDER="openai"
+export LLM_MODEL="gpt-3.5-turbo"  # or "gpt-4"
+```
+
+**Option 2: Using Anthropic**
+```bash
+export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
+export LLM_PROVIDER="anthropic"
+export LLM_MODEL="claude-3-haiku-20240307"
+```
+
+**Option 3: Using .env file**
+Create a `.env` file in the project root:
+```bash
+OPENAI_API_KEY=your_openai_api_key_here
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-3.5-turbo
+```
+
+Then install python-dotenv and the system will load it automatically:
+```bash
+pip install python-dotenv
+```
+
+**Note:** If no API key is configured, the system will use rule-based fallback logic (useful for testing, but agents won't have LLM reasoning capabilities).
+
+### Step 4: Set Up the Database
 
 ```bash
 python database_setup.py
@@ -216,7 +253,7 @@ When prompted:
 
 This will create `support.db` with sample customers and tickets.
 
-### Step 4: Verify Installation
+### Step 5: Verify Installation
 
 Run a quick test to ensure everything is set up correctly:
 
