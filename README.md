@@ -52,70 +52,64 @@ Design a multi-agent system with at least two specialized agents:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    demo/main.py                              │
-│              (Uses LangGraph SDK)                            │
-│                                                              │
-│  from agents.graph import build_workflow                     │
+│                    demo/main.py                             │
+│              (Uses LangGraph SDK)                           │
+│                                                             │
+│  from agents.graph import build_workflow                    │
 │  graph_app = build_workflow()                               │
-│  final_state = graph_app.invoke(initial_state)               │
+│  final_state = graph_app.invoke(initial_state)              │
 └───────────────────────┬─────────────────────────────────────┘
                         │
                         v
         ┌───────────────────────────────────┐
         │   LangGraph Workflow (StateGraph) │
-        │   (Orchestrates agents via A2A)    │
+        │   (Orchestrates agents via A2A)   │
         └───────────────┬───────────────────┘
                         │
                         v
         ┌───────────────────────────────────┐
-        │   Router Agent (Orchestrator)    │
+        │   Router Agent (Orchestrator)     │
         │   - Receives customer queries     │
         │   - Analyzes query intent         │
         │   - Routes to specialist agents   │
         │   - Coordinates responses         │
         └───────────────┬───────────────────┘
                         │
-        ┌───────────────┼───────────────┐
-        │               │               │
-        v               v               │
-┌───────────────┐ ┌──────────────┐      │
-│ Customer Data │ │  Support     │      │
-│ Agent         │ │  Agent       │      │
-│ (Specialist)  │ │  (Specialist)│      │
-│               │ │              │      │
-│ - Accesses DB │ │ - Handles    │      │
-│   via MCP     │ │   support    │      │
-│ - Retrieves   │ │   queries    │      │
-│   customer    │ │ - Escalates  │      │
-│   information │ │   issues     │      │
-│ - Updates     │ │ - Requests   │      │
-│   records     │ │   context    │      │
-│ - Handles     │ │   from Data  │      │
-│   validation  │ │   Agent      │      │
-│               │ │ - Provides   │      │
-│               │ │   solutions  │      │
-└───────┬───────┘ └───────┬───────┘      │
-        │                 │               │
-        │   A2A           │   A2A         │
-        │                 │               │
-        │                 │               │
-        ▼                 ▼               │
-┌─────────────────────────────────┐
-│      MCP Server                │
-│      (Database)                │
-│                                │
-│  - get_customer                │
-│  - list_customers              │
-│  - update_customer             │
-│  - create_ticket               │
-│  - get_customer_history         │
-└─────────────────────────────────┘
-        │
-        │
-        v
-┌───────────────────────────────┐
-│      Final Response           │
-└───────────────────────────────┘
+        ┌───────────────┴───────────────┐
+        │                               │
+        v                               v
+┌───────────────────────┐ ┌───────────────────────┐
+│  Customer Data Agent  │ │   Support Agent       │
+│     (Specialist)      │ │     (Specialist)      │
+│                       │ │                       │
+│ - Accesses DB via MCP │ │ - Handles support     │
+│ - Retrieves customer  │ │   queries             │
+│   information         │ │ - Escalates issues    │
+│ - Updates records     │ │ - Requests context    │
+│ - Handles validation  │ │   from Data Agent     │
+│                       │ │ - Provides solutions  │
+└───────────┬───────────┘ └───────────┬───────────┘
+            │                         │
+            │   A2A                   │   A2A
+            │                         │
+            │                         │
+            ▼                         ▼
+        ┌─────────────────────────────────┐
+        │      MCP Server                 │
+        │      (Database)                 │
+        │                                 │
+        │  - get_customer                 │
+        │  - list_customers               │
+        │  - update_customer              │
+        │  - create_ticket                │
+        │  - get_customer_history         │
+        └─────────────────────────────────┘
+                        │
+                        │
+                        v
+         ┌───────────────────────────────┐
+         │      Final Response           │
+         └───────────────────────────────┘
 ```
 
 ---
