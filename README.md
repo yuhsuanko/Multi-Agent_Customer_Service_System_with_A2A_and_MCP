@@ -125,7 +125,7 @@ Design a multi-agent system with at least two specialized agents:
 
 This implementation is designed to comply with both **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** specifications as required by the assignment.
 
-### MCP Protocol Compliance ✓
+### MCP Protocol Compliance
 
 The MCP server (`db_mcp_server.py`) implements:
 - **SSE (Server-Sent Events)** endpoint (`/sse`) for streaming communication
@@ -147,7 +147,7 @@ curl -X POST http://localhost:8000/tools/call \
   -d '{"tool": "get_customer", "arguments": {"customer_id": 1}}'
 ```
 
-### A2A Protocol Compliance ✓
+### A2A Protocol Compliance
 
 Each agent implements the full A2A specification:
 - **`/agent/card`** endpoint for agent discovery (GET)
