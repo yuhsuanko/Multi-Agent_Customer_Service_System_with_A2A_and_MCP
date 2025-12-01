@@ -77,7 +77,7 @@ All agents use LLM backends for intelligent reasoning and decision-making:
 
 ## Protocol Compliance
 
-This implementation fully complies with both **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** specifications as required by the assignment.
+This implementation is designed to comply with both **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** specifications as required by the assignment.
 
 ### MCP Protocol Compliance ✓
 
@@ -192,7 +192,7 @@ The system implements three core coordination patterns:
 3. Customer Data Agent → Router: Returns customer list
 4. Router → Support Agent: "Get high-priority tickets for these IDs"
 5. Support Agent queries tickets via MCP for each customer
-6. Agents coordinate to format report
+6. Agents coordinate to format the report
 7. Router synthesizes final answer
 
 ---
@@ -231,7 +231,7 @@ The agents use LLM backends for intelligent reasoning. You need to configure an 
 ```bash
 export OPENAI_API_KEY="your_openai_api_key_here"
 export LLM_PROVIDER="openai"
-export LLM_MODEL="gpt-3.5-turbo"  # or "gpt-4"
+export LLM_MODEL="gpt-5-nano"  # or "gpt-4"
 ```
 
 **Option 2: Using Anthropic**
