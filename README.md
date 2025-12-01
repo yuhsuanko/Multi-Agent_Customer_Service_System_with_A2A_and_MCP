@@ -10,7 +10,7 @@ This project implements a multi-agent customer-service automation system that de
 - **Multi-agent task allocation, negotiation, and multi-step coordination**
 - **Practical customer service automation** with specialized agent roles
 
-The system uses **LangGraph SDK directly** in `demo/main.py` to execute the multi-agent workflow. The workflow orchestrates agents that communicate via A2A protocol, demonstrating how specialized agents collaborate to analyze customer queries, retrieve structured data, escalate issues, and generate user-facing responses.
+The system uses **LangGraph SDK** in `demo/main.py` to execute the multi-agent workflow. The workflow orchestrates agents that communicate via A2A protocol, demonstrating how specialized agents collaborate to analyze customer queries, retrieve structured data, escalate issues, and generate user-facing responses.
 
 ---
 
