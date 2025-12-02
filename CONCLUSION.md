@@ -10,7 +10,7 @@ The primary challenge was ensuring full protocol compliance with both MCP and A2
 
 ## demo output
 
-(base) yuhsuanko@Yu-HsuandeMBP Multi-Agent Customer Service System with A2A and MCP % python3 demo/main.py
+(base) yuhsuanko@Yu-HsuandeMBP Multi-Agent Customer Service System with A2A and MCP % python demo/main.py
 
 ================================================================================
 MULTI-AGENT CUSTOMER SERVICE SYSTEM - END-TO-END DEMONSTRATION
@@ -25,10 +25,9 @@ The workflow orchestrates agents that communicate via A2A protocol:
 
 NOTE: This demo uses LangGraph SDK (StateGraph) as required.
 Agents are independent services with A2A endpoints.
-
-✓ LangGraph SDK is available
+LangGraph SDK is available
 [Building LangGraph workflow using SDK...]
-✓ LangGraph workflow built successfully
+LangGraph workflow built successfully
 
 
 ================================================================================
@@ -44,36 +43,29 @@ USER QUERY: I need help with my account, customer ID 12345
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: task_allocation]
-[Detected Intents: account_help]
+[Detected Scenario: unknown]
+[Detected Intents: get_customer_info]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=task_allocation, intents=['account_help'], customer_id=12345, new_email=None, urgency=normal
+  [Router -> Router] Parsed query. intents=['get_customer_info'], customer_id=12345, new_email=None, urgency=normal
+  [Router -> data_agent] Routing decision: To address the user's account question for customer 12345, we need to retrieve the customer's stored data and ticket history before responding.
   [CustomerDataAgent -> Router] Fetched customer info for id=12345, found=False, status=None. Returning customer data to Router.
-  [SupportAgent -> Router] Generated support response. Scenario=task_allocation, intents=['account_help']
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['get_customer_info']
 
 --- FINAL RESPONSE ---
-Hello,
+Hello! I can help with your account for Customer ID 12345.
 
-I can help with your account for Customer ID 12345. To get you the right assistance quickly, could you tell me a bit more about the issue you’re facing? For example:
+To securely pull up your information, please confirm:
+- The full name on the account
+- The email address on file
 
-- Login or password problems
-- Updating account details (email, phone, etc.)
-- Billing or charges questions
-- Security or unusual activity
+Once you verify, I’ll fetch:
+- Account status and current plan
+- Billing summary (balance, upcoming charges, next due date)
+- Recent activity
+- Your ticket history (and any open tickets, if applicable)
 
-If you’re not sure where to start, here are some quick options I can help with right now:
-
-- Password reset or login help: Go to the login page and click “Forgot password,” then enter the email on file for this account. If you don’t have access to that email, I can guide you through secure identity verification to update it.
-- Update contact details: I can help update your email or phone number once we verify your identity.
-- Billing information: I can pull up your current plan, recent invoices, or assist with updating your payment method.
-- Security improvements: I can help enable two-factor authentication and review recent activity.
-
-For security, to verify your identity in this chat, please confirm one of the following:
-- The email address on file for this account, or
-- The last four digits of the payment method on file (if applicable)
-
-Once you provide that, I’ll proceed with the appropriate steps. If this issue is urgent, let me know and I’ll prioritize it.
+If there are specific details you want included (e.g., last login, recent charges, or open tickets), let me know and I’ll include them.
 
 ================================================================================
 
@@ -87,35 +79,35 @@ USER QUERY: I want to cancel my subscription but I'm having billing issues
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: escalation]
+[Detected Scenario: unknown]
 [Detected Intents: cancel_subscription, billing_issue]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=escalation, intents=['cancel_subscription', 'billing_issue'], customer_id=None, new_email=None, urgency=normal
+  [Router -> Router] Parsed query. intents=['cancel_subscription', 'billing_issue'], customer_id=None, new_email=None, urgency=normal
   [Router -> SupportAgent] Router detected multiple intents (cancellation + billing). Can you handle this?
-  [SupportAgent -> Router] Generated support response. Scenario=escalation, intents=['cancel_subscription', 'billing_issue']
+  [Router -> data_agent] Routing decision: The user wants to cancel a subscription and has billing issues, but we have no customer identifiers or account data. We must fetch the customer's account, subscription status, and billing history before proceeding.
+  [SupportAgent -> Router] I need billing context (customer_id) to handle this escalation.
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['cancel_subscription', 'billing_issue']
 
 --- FINAL RESPONSE ---
-Hi there,
+I’m sorry you’re hitting billing issues while trying to cancel. I can help with both canceling your subscription and investigating the charges.
 
-I’m sorry you’re running into billing issues while trying to cancel. I’ve opened a dedicated support ticket to handle both your cancellation request and the billing problem.
+What I can do for you
+- Cancel your subscription now or specify end of the current billing period.
+- Open a billing issue ticket to investigate the charge(s) and ensure any due adjustments are handled.
 
-Ticket details:
-- Ticket ID: ESC-20251201-001
+What I need from you to proceed
+- Account email or username (the one tied to the subscription)
+- Subscription ID or the exact plan name
+- Do you want the cancellation effective immediately or at the end of the current billing cycle?
+- A brief note on the billing issue (e.g., unexpected charge, duplicate charge, failed payment, etc.)
+- Optional: any relevant invoices or screenshots
 
-What happens next:
-- Our billing and subscriptions teams will review the charges and assist with the cancellation as appropriate.
-- You’ll receive updates via your preferred contact method as soon as we have more information.
+Would you like me to:
+- Cancel now and simultaneously open a billing issue ticket for you? If you say yes, I’ll generate a reference number and keep you updated, or
+- Cancel at the end of the current period and then start the billing investigation after that?
 
-To help us resolve this faster, please reply with:
-- The account email and your subscription ID or plan name
-- Last 4 digits of the payment method on file (if you’re comfortable sharing)
-- A brief description of the billing issue (e.g., error messages, invoice numbers, dates)
-- Your preferred contact method and best times to reach you
-
-If you’d like, you can also share any other details you think are relevant. We’ll keep you posted as soon as we have an update. 
-
-Thank you for your patience—we’ll get this sorted.
+Please reply with the details above and your preferred option, and I’ll get everything processed right away.
 
 ================================================================================
 
@@ -129,17 +121,18 @@ USER QUERY: What's the status of all high-priority tickets for premium customers
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: multi_step]
-[Detected Intents: ticket_status_query, filter_by_priority, filter_by_customer_tTier]
+[Detected Scenario: unknown]
+[Detected Intents: get_ticket_status, filter_tickets_by_priority_and_customer_type]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=multi_step, intents=['ticket_status_query', 'filter_by_priority', 'filter_by_customer_tTier'], customer_id=None, new_email=None, urgency=normal
+  [Router -> Router] Parsed query. intents=['get_ticket_status', 'filter_tickets_by_priority_and_customer_type'], customer_id=None, new_email=None, urgency=normal
+  [Router -> data_agent] Routing decision: The request requires identifying premium customers and their tickets; current state lacks customer data, customer list, and ticket data.
   [CustomerDataAgent -> Router] Fetched 12 active customers for multi-step report.
-  [SupportAgent -> Router] Fetched 10 high-priority tickets from 12 premium customers via MCP.
-  [SupportAgent -> Router] Generated support response. Scenario=multi_step, intents=['ticket_status_query', 'filter_by_priority', 'filter_by_customer_tTier']
+  [SupportAgent -> Router] LLM decided to fetch tickets. Retrieved 10 tickets with filters: {'priority': 'high'}
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['get_ticket_status', 'filter_tickets_by_priority_and_customer_type']
 
 --- FINAL RESPONSE ---
-Premium status acknowledged. Here are all high-priority tickets for active premium customers, with exact IDs and details:
+Here are the high-priority tickets for premium customers, as retrieved:
 
 - Ticket ID: 26 | Customer: John Doe (ID: 1) | Status: open | Priority: high | Issue: Test issue created by MCP tool
 - Ticket ID: 1 | Customer: John Doe (ID: 1) | Status: open | Priority: high | Issue: Cannot login to account
@@ -152,7 +145,7 @@ Premium status acknowledged. Here are all high-priority tickets for active premi
 - Ticket ID: 4 | Customer: Hannah Lee (ID: 10) | Status: in_progress | Priority: high | Issue: Critical security vulnerability found
 - Ticket ID: 5 | Customer: Laura Martinez (ID: 14) | Status: resolved | Priority: high | Issue: Website completely down
 
-Would you like me to filter or drill down by a specific customer or status, or set up follow-ups on any of these tickets?
+If you’d like, I can also summarize how many are open vs in progress vs resolved, or pull any additional details for specific tickets.
 
 ================================================================================
 
@@ -171,25 +164,30 @@ USER QUERY: Get customer information for ID 5
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: task_allocation]
+[Detected Scenario: unknown]
 [Detected Intents: get_customer_info]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=task_allocation, intents=['get_customer_info'], customer_id=5, new_email=None, urgency=normal
+  [Router -> Router] Parsed query. intents=['get_customer_info'], customer_id=5, new_email=None, urgency=normal
+  [Router -> data_agent] Routing decision: Customer data for ID 5 is not loaded; retrieve the full customer record using data_agent.
   [CustomerDataAgent -> Router] Fetched customer info for id=5, found=True, status=active. Returning customer data to Router.
   [Router -> Router] Analyzed customer tier/status: tier=premium, status=active
-  [SupportAgent -> Router] Generated support response. Scenario=task_allocation, intents=['get_customer_info']
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['get_customer_info']
 
 --- FINAL RESPONSE ---
-Hi Charlie,
+Hi there,
 
-Here is the customer information for ID 5:
-
+Here’s the information I have for Charlie Brown (ID: 5):
 - Name: Charlie Brown
 - ID: 5
 - Status: Active
+- Ticket history: not retrieved yet
 
-If you’d like more details (e.g., contact info, account plan, recent activity), tell me what you need and I’ll pull it up.
+Would you like me to pull Charlie’s full profile details (email, phone, address, account plan, billing cycle) and their ticket history? I can fetch and present a structured summary, for example:
+- Profile: Email, Phone, Address, Plan, Billing Cycle
+- Tickets: List of all tickets with Ticket ID, Status, Priority, and Issue
+
+Please tell me which details you’d like included, and I’ll fetch them right away.
 
 ================================================================================
 
@@ -203,27 +201,26 @@ USER QUERY: I'm customer 12345 and need help upgrading my account
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: task_allocation]
+[Detected Scenario: unknown]
 [Detected Intents: upgrade_account]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=task_allocation, intents=['upgrade_account'], customer_id=12345, new_email=None, urgency=normal
+  [Router -> Router] Parsed query. intents=['upgrade_account'], customer_id=12345, new_email=None, urgency=normal
+  [Router -> data_agent] Routing decision: We need to retrieve the customer's existing account information and eligibility before processing an upgrade.
   [CustomerDataAgent -> Router] Fetched customer info for id=12345, found=False, status=None. Returning customer data to Router.
-  [SupportAgent -> Router] Generated support response. Scenario=task_allocation, intents=['upgrade_account']
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['upgrade_account']
 
 --- FINAL RESPONSE ---
-Hi Customer 12345! I’d be glad to help you upgrade your account.
+Hi there! I can help you upgrade your account.
 
-Here are the upgrade options we offer:
-- Basic/Starter
-- Pro
-- Premium
+To get you set up, could you please share:
+- Which plan you want to upgrade to (or the features you need, e.g., more storage, more users, premium support)?
+- Your preferred billing frequency (monthly or yearly)?
+- Do you want me to proceed using the payment method on file, or would you like to review options first?
 
-To proceed, please tell me:
-- Which plan would you like to upgrade to (Basic/Starter, Pro, or Premium)?
-- Confirm the billing email on file or the preferred payment method you’d like to use
+If you’re not sure which plan is best, I can outline the differences once you tell me the features you need.
 
-If you’d rather, I can also share a secure upgrade link or guide you to the upgrade page. Once you confirm the plan and payment method, I’ll initiate the upgrade right away.
+Once you confirm, I’ll take care of the upgrade right away and send you a confirmation.
 
 ================================================================================
 
@@ -237,21 +234,35 @@ USER QUERY: Show me all active customers who have open tickets
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: multi_step]
-[Detected Intents: list_active_customers, filter_open_tickets]
+[Detected Scenario: unknown]
+[Detected Intents: retrieve_active_customers_with_open_tickets]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=multi_step, intents=['list_active_customers', 'filter_open_tickets'], customer_id=None, new_email=None, urgency=normal
+  [Router -> Router] Parsed query. intents=['retrieve_active_customers_with_open_tickets'], customer_id=None, new_email=None, urgency=normal
+  [Router -> data_agent] Routing decision: To identify all active customers with open tickets, we must fetch the customer list and their ticket histories/status via MCP tools.
   [CustomerDataAgent -> Router] Fetched 12 active customers for multi-step report.
-  [SupportAgent -> Router] Fetched 16 open tickets from 12 active customers via MCP.
-  [SupportAgent -> Router] Generated support response. Scenario=multi_step, intents=['list_active_customers', 'filter_open_tickets']
+  [SupportAgent -> Router] LLM decided to fetch tickets. Retrieved 16 tickets with filters: {'status': 'open'}
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['retrieve_active_customers_with_open_tickets']
 
 --- FINAL RESPONSE ---
 Hello,
 
-Here are all active open tickets for active customers (16 total). Premium customers are acknowledged below as part of this active set.
+Here’s what you requested.
 
-Open tickets for active customers:
+Active customers who have open tickets:
+- John Doe (ID: 1)
+- Jane Smith (ID: 2)
+- Alice Williams (ID: 4)
+- Charlie Brown (ID: 5)
+- Diana Prince (ID: 6)
+- Edward Norton (ID: 7)
+- George Miller (ID: 9)
+- Hannah Lee (ID: 10)
+- Isaac Newton (ID: 11)
+- Julia Roberts (ID: 12)
+- Michael Scott (ID: 15)
+
+Open tickets for premium customers (listed with exact IDs and details):
 - Ticket ID: 26 | Customer: John Doe (ID: 1) | Status: open | Priority: high | Issue: Test issue created by MCP tool
 - Ticket ID: 1 | Customer: John Doe (ID: 1) | Status: open | Priority: high | Issue: Cannot login to account
 - Ticket ID: 30 | Customer: Jane Smith (ID: 2) | Status: open | Priority: high | Issue: Billing issue with possible double charge and/or cancellation request
@@ -269,15 +280,7 @@ Open tickets for active customers:
 - Ticket ID: 21 | Customer: Julia Roberts (ID: 12) | Status: open | Priority: low | Issue: Color scheme suggestion for better contrast
 - Ticket ID: 13 | Customer: Michael Scott (ID: 15) | Status: open | Priority: medium | Issue: API rate limiting too restrictive
 
-Premium status acknowledgement:
-- Premium customers in this active set: John Doe, Jane Smith, Alice Williams, Charlie Brown, Diana Prince, Edward Norton, George Miller, Hannah Lee, Isaac Newton, Julia Roberts, Laura Martinez, Michael Scott.
-- Note: All listed tickets pertain to active customers, including premium accounts. If you’d like, I can filter this view to only premium customers or only high-priority tickets.
-
-Would you like me to:
-- Filter to only high-priority tickets, or
-- Filter to premium customers, or
-- Export this report to CSV, or
-- Take any action (e.g., escalate or add notes) on specific tickets?
+If you’d like, I can filter or export these into a report, or open a support ticket to follow up on any specific item.
 
 ================================================================================
 
@@ -291,36 +294,31 @@ USER QUERY: I've been charged twice, please refund immediately!
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: escalation]
-[Detected Intents: billing_issue, refund_request]
+[Detected Scenario: unknown]
+[Detected Intents: refund, billing_dispute]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=escalation, intents=['billing_issue', 'refund_request'], customer_id=None, new_email=None, urgency=high
-  [Router -> SupportAgent] Router detected multiple intents (cancellation + billing). Can you handle this?
-  [SupportAgent -> Router] Generated support response. Scenario=escalation, intents=['billing_issue', 'refund_request']
+  [Router -> Router] Parsed query. intents=['refund', 'billing_dispute'], customer_id=None, new_email=None, urgency=high
+  [Router -> data_agent] Routing decision: Cannot process refund without identifying the customer and locating the duplicate charge. No customer_id or billing data is available yet.
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['refund', 'billing_dispute']
 
 --- FINAL RESPONSE ---
-Hi there,
+I’m really sorry about the double charge—that’s not what you should experience. I’ve created a high-priority refund ticket so our Billing team can investigate and issue a refund as quickly as possible.
 
-I’m sorry you were charged twice—that’s understandably upsetting. I’ve opened a billing escalation ticket to get this resolved right away. Here are the details:
-
-- Ticket ID: REFUND-2025-00123
-- Status: Escalated to Billing for review
-- Priority: High
-
-What I need from you to speed this up:
-- The date and amount of the duplicate charge
+To help us process this faster, please reply with:
+- The transaction/order ID or invoice number for each charge
+- The date of each charge and the amounts (the two charges)
 - The last four digits of the card used (or the payment method)
-- Any order or invoice/reference number associated with the charge
-- A quick note about which charge you believe is duplicate
+- The email on your account and the billing address on file
+- A screenshot or copy of the charges if you have it
+- Confirm that you want the refunds issued to the original payment method
 
 What happens next:
-- Our Billing team will review the duplicate charge and issue a refund to the original payment method once confirmed.
-- You’ll receive updates via email as the ticket progresses.
+- You’ll receive updates on the ticket status via email.
+- If we need any more information, we’ll reach out right away.
+- Refunds typically appear on your original payment method within 5–10 business days, depending on your bank. We’ll do our best to expedite the process.
 
-If you have screenshots or receipts, you can reply with them to help us verify faster.
-
-We’re on this and will keep you posted.
+If you’d like, you can send the above details here and I’ll attach them to the ticket for you. Again, I’m sorry for the hassle—we’ll get this sorted as soon as possible.
 
 ================================================================================
 
@@ -334,19 +332,33 @@ USER QUERY: Update my email to new.email@example.com and show my ticket history.
 [Building LangGraph workflow using SDK...]
 [Executing LangGraph workflow...]
 
-[Detected Scenario: multi_intent]
-[Detected Intents: update_email, show_ticket_history]
+[Detected Scenario: unknown]
+[Detected Intents: update_email, view_ticket_history]
 
 --- AGENT-TO-AGENT COMMUNICATION LOGS ---
-  [Router -> Router] Parsed query. Scenario=multi_intent, intents=['update_email', 'show_ticket_history'], customer_id=None, new_email=new.email@example.com, urgency=normal
-  [SupportAgent -> Router] Generated support response. Scenario=multi_intent, intents=['update_email', 'show_ticket_history']
+  [Router -> Router] Parsed query. intents=['update_email', 'view_ticket_history'], customer_id=None, new_email=new.email@example.com, urgency=normal
+  [Router -> data_agent] Routing decision: No customer_id or customer data available. To update the email and fetch ticket history, we must identify the customer and retrieve their ticket history using the data_agent.
+  [SupportAgent -> Router] Generated support response. Scenario=coordinated, intents=['update_email', 'view_ticket_history']
 
 --- FINAL RESPONSE ---
-Hello,
+Hi there! I can help with updating your email to new.email@example.com and pulling up your ticket history.
 
-I’ve updated your account email to new.email@example.com. You’ll start receiving notifications at that address. If you’d like this to be the contact for billing as well, just say the word.
+To proceed, I’ll need to verify your account. Could you please confirm or provide:
+- Your full name as it appears on the account
+- The current email on file (if you know it)
+- Your Customer ID (if you have it)
+- Confirm the new email address: new.email@example.com
 
-About your ticket history: I can pull up your recent tickets and display them here. Would you like me to fetch the latest 10 tickets for you and show them in this chat? If you prefer a different range, or if you’d rather have the history emailed to your new address, tell me how you’d like to proceed.
+What happens next after verification:
+- I will update your email to the new address and send a verification to new.email@example.com (if required by our system).
+- I will then retrieve your ticket history and present it clearly, including:
+  - Ticket ID
+  - Customer ID / Name
+  - Status
+  - Priority
+  - Issue description
+
+If you prefer, you can share just what you’re comfortable with, and I’ll guide you through the rest.
 
 ================================================================================
 

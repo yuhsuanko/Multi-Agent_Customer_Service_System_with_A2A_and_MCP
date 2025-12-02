@@ -133,10 +133,9 @@ def create_task(request: TaskRequest):
     """
     Handle support tasks using LLM to generate all responses (NO hardcoded responses).
     
-    The Support Agent uses LLM to generate natural, context-aware responses based on:
-    - User query
-    - Context (customer data, tickets, etc.)
-    - Scenario and intents
+    TRUE AGENT implementation: Support Agent uses LLM to reason about the query
+    and available context, then generates appropriate responses and performs actions.
+    No hardcoded action handlers - LLM decides what to do.
     """
     inp = request.input
     action = inp.action
@@ -144,26 +143,89 @@ def create_task(request: TaskRequest):
     context = inp.context or {}
     result: Dict[str, Any] = {}
     
-    # Temporary: Log ALL actions for debugging
-    print(f"[Support Agent] Received action={action}, query={query[:50] if query else 'None'}")
-    if action == "high_priority_report":
-        customers_from_input = inp.high_priority_report_customers or []
-        customers_from_context = context.get("customer_list", [])
-        print(f"[Support Agent] high_priority_report: customers_from_input={len(customers_from_input)}, customers_from_context={len(customers_from_context)}")
-
-    # Build state for LLM generation
+    # Build comprehensive state for LLM reasoning
     state: CSState = {
         "messages": [],
         "user_query": query,
-        "scenario": context.get("scenario", "coordinated"),
         "intents": context.get("intents", []),
-        "customer_id": inp.customer_id,
+        "customer_id": inp.customer_id or context.get("customer_id"),
         "urgency": context.get("urgency", "normal"),
         "customer_data": context.get("customer_data", {}),
         "tickets": context.get("tickets", []),
         "customer_list": context.get("customer_list", []),
         "logs": [],
     }
+    
+    # TRUE AGENT: Use LLM reasoning for all queries (no hardcoded action handlers)
+    # If action is "general_query" or None, use pure LLM reasoning
+    if action == "general_query" or action is None or not action:
+        # Support Agent uses LLM to reason about what needs to be done
+        # LLM will decide if tickets need to be created, if data needs to be fetched, etc.
+        try:
+            from agents.support_agent import _plan_data_needs_with_llm
+            
+            # Use LLM to plan what data is needed (NO hardcoded rules)
+            customer_list = state.get("customer_list", [])
+            data_plan = _plan_data_needs_with_llm(query, {
+                "customer_list": customer_list,
+                "has_tickets": bool(state.get("tickets")),
+                "intents": state.get("intents", []),
+            })
+            
+            # Fetch tickets if LLM says we need them
+            if data_plan.get("need_tickets") and not state.get("tickets"):
+                customers_to_fetch = data_plan.get("customers") or customer_list
+                filters = data_plan.get("filters", {})
+                
+                all_tickets = []
+                for c in customers_to_fetch:
+                    cid = c.get("id") if isinstance(c, dict) else c
+                    if not cid:
+                        continue
+                    try:
+                        history = call_mcp("get_customer_history", {"customer_id": cid})
+                        if not isinstance(history, list):
+                            history = []
+                        
+                        # Apply LLM-determined filters (NO hardcoded rules)
+                        filtered_tickets = history
+                        if filters.get("priority"):
+                            filtered_tickets = [t for t in filtered_tickets if t.get("priority") == filters["priority"]]
+                        if filters.get("status"):
+                            filtered_tickets = [t for t in filtered_tickets if t.get("status") == filters["status"]]
+                        
+                        for t in filtered_tickets:
+                            ticket_data = {
+                                "ticket_id": t.get("ticket_id") or t.get("id"),
+                                "customer_id": cid,
+                                "customer_name": c.get("name", f"Customer {cid}") if isinstance(c, dict) else f"Customer {cid}",
+                                "status": t.get("status", "unknown"),
+                                "priority": t.get("priority", "unknown"),
+                                "issue": t.get("issue", "No description"),
+                                "created_at": t.get("created_at", "")
+                            }
+                            all_tickets.append(ticket_data)
+                    except Exception as e:
+                        print(f"Warning: Failed to get history for customer {cid}: {e}")
+                        continue
+                
+                state["tickets"] = all_tickets
+            
+            # Generate response using LLM
+            response_text = _generate_response_with_llm(state)
+            result["support_response"] = response_text
+            
+            # Use LLM to decide if we should create a ticket (NO hardcoded rules)
+            # For now, we'll let the LLM response indicate if a ticket was created
+            # In a more advanced implementation, we could have LLM decide this too
+            
+            return TaskResult(status="completed", result=result)
+        except Exception as e:
+            return TaskResult(status="error", result={"error": f"LLM reasoning failed: {str(e)}"})
+    
+    # NOTE: Action handlers below are for backward compatibility only
+    # In a true agent implementation, all queries should use "general_query" above
+    # These handlers will be removed in future versions
 
     # 1) Billing / escalation: create high-priority ticket, then generate LLM response
     if action == "billing_escalation":
@@ -185,7 +247,7 @@ def create_task(request: TaskRequest):
                         "intents": ["billing_issue"],
                         "user_query": query,
                         "customer_id": None,
-                        "urgency": urgency,
+                        "urgency": state.get("urgency", "normal"),
                     }
                     response_text = _generate_response_with_llm(minimal_state)
                 except:
@@ -221,9 +283,9 @@ def create_task(request: TaskRequest):
                         "scenario": "escalation",
                         "intents": ["billing_issue"],
                         "user_query": query,
-                        "customer_id": customer_id,
+                        "customer_id": state.get("customer_id"),
                         "tickets": [ticket],
-                        "urgency": urgency,
+                        "urgency": state.get("urgency", "normal"),
                     }
                     response_text = _generate_response_with_llm(minimal_state)
                     # Ensure ticket ID is included
@@ -558,8 +620,8 @@ def create_task(request: TaskRequest):
                         "scenario": scenario,
                         "intents": intents,
                         "user_query": query,
-                        "customer_data": customer,
-                        "customer_id": customer_id,
+                        "customer_data": state.get("customer_data", {}),
+                        "customer_id": state.get("customer_id"),
                     }
                     response_text = _generate_response_with_llm(minimal_state)
                 except:

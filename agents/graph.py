@@ -39,42 +39,39 @@ def build_workflow():
     # Entry point is the router
     workflow.set_entry_point("router")
 
-    # Conditional routing after router
+    # Conditional routing after router - LLM-driven decision making
     def router_to_next(state: CSState) -> str:
         """
-        Decide which node to go to after the router based on the scenario.
+        Use LLM to decide which agent to call next.
+        
+        TRUE AGENT implementation: LLM reasons about what's needed
+        and decides routing dynamically, without hardcoded scenarios.
         """
-        scenario = state.get("scenario", "coordinated")
-        customer_id = state.get("customer_id")
-
-        # Scenario 1: Task allocation (simple customer info)
-        if scenario == "task_allocation":
-            return "data_agent"
-
-        # Scenario 2: Escalation / billing issue
-        # Router first checks with Support Agent, then gets billing context if needed
-        if scenario == "escalation":
-            # Router negotiates: first route to Support Agent to check if it can handle
-            # Support Agent will indicate it needs billing context
-            # Then Router will route to Data Agent if customer_id exists
-            if customer_id is not None:
-                # For negotiation flow: Router → Support checks → Data Agent → Support
-                # We'll route to Support first to show negotiation, then to Data
-                # In LangGraph, we implement this as: Router → Support (implicit check) → Data → Support
-                # For simplicity, we route to Data first to get context, then Support
-                return "data_agent"  # Fetch customer/billing data first for context
-            return "support_agent"   # Skip data fetch if no customer_id
-
-        # Scenario 3: Multi-step coordination (reports)
-        if scenario == "multi_step":
-            return "data_agent"
-
-        # Multi-intent: update email + ticket history
-        if scenario == "multi_intent":
-            return "data_agent"
-
-        # Default: coordinated query (Router -> Data -> Support)
-        return "data_agent"
+        from .router_agent import _decide_routing_with_llm
+        
+        query = state.get("user_query", "")
+        current_state = {
+            "customer_id": state.get("customer_id"),
+            "customer_data": state.get("customer_data"),
+            "customer_list": state.get("customer_list"),
+            "tickets": state.get("tickets"),
+            "intents": state.get("intents", []),
+        }
+        
+        # Use LLM to decide routing
+        routing_decision = _decide_routing_with_llm(query, current_state)
+        next_agent = routing_decision.get("next_agent", "data_agent")
+        
+        # Log the routing decision
+        logs = state.get("logs", [])
+        logs.append({
+            "sender": "Router",
+            "receiver": next_agent,
+            "content": f"Routing decision: {routing_decision.get('reason', '')}"
+        })
+        state["logs"] = logs
+        
+        return next_agent
 
     workflow.add_conditional_edges(
         "router",

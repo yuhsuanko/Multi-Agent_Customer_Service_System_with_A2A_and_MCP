@@ -140,15 +140,15 @@ def create_task(request: TaskRequest):
     
     result: Dict[str, Any] = {}
 
-    # If action is not provided, use LLM to determine what operations are needed
-    if not action and query:
+    # If action is "general_query" or not provided, use LLM to determine what operations are needed
+    if action == "general_query" or (not action and query):
         # Build state for LLM reasoning
         state: CSState = {
             "messages": [],
             "user_query": query,
-            "scenario": context.get("scenario", "coordinated"),
             "intents": context.get("intents", []),
-            "customer_id": inp.customer_id,
+            "customer_id": inp.customer_id or context.get("customer_id"),
+            "new_email": context.get("new_email"),
             "logs": [],
         }
         
@@ -157,22 +157,53 @@ def create_task(request: TaskRequest):
             data_plan = _reason_about_data_needs(state)
             operations = data_plan.get("operations", [])
             
-            if operations:
-                # Execute the first operation determined by LLM
-                op = operations[0]
-                action = op.get("action")
-                # Update parameters from LLM-determined operation
-                if "customer_id" in op:
-                    inp.customer_id = op["customer_id"]
-                if "filters" in op:
-                    if "status" in op["filters"]:
-                        inp.status = op["filters"]["status"]
-                if "update_data" in op:
-                    inp.update_data = op["update_data"]
+            if not operations:
+                return TaskResult(status="error", result={"error": "LLM could not determine required data operations."})
+            
+            # Execute all operations determined by LLM
+            for op in operations:
+                op_action = op.get("action")
+                op_customer_id = op.get("customer_id") or inp.customer_id
+                op_filters = op.get("filters", {})
+                op_update_data = op.get("update_data", {})
+                
+                if op_action == "get_customer":
+                    if op_customer_id is None:
+                        continue
+                    result["customer"] = call_mcp("get_customer", {"customer_id": op_customer_id})
+                
+                elif op_action == "list_customers":
+                    result["customers"] = call_mcp(
+                        "list_customers",
+                        {"status": op_filters.get("status"), "limit": op_filters.get("limit", 50)},
+                    )
+                
+                elif op_action == "get_customer_history":
+                    if op_customer_id is None:
+                        continue
+                    history = call_mcp("get_customer_history", {"customer_id": op_customer_id})
+                    if "history" not in result:
+                        result["history"] = []
+                    if isinstance(history, list):
+                        result["history"].extend(history)
+                    elif isinstance(history, dict) and "tickets" in history:
+                        result["history"].extend(history["tickets"])
+                
+                elif op_action == "update_customer":
+                    if op_customer_id is None or not op_update_data:
+                        continue
+                    update_result = call_mcp(
+                        "update_customer",
+                        {"customer_id": op_customer_id, "data": op_update_data},
+                    )
+                    result["update_result"] = update_result
+            
+            return TaskResult(status="completed", result=result)
+            
         except Exception as e:
             return TaskResult(status="error", result={"error": f"LLM reasoning failed: {str(e)}. Please provide 'action' explicitly."})
 
-    # Now execute the determined or provided action
+    # Now execute the determined or provided action (for backward compatibility)
     if action == "get_customer":
         if inp.customer_id is None:
             return TaskResult(status="error", result={"error": "customer_id is required"})

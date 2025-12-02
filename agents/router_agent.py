@@ -65,10 +65,13 @@ def _extract_email(query: str) -> str:
 
 def _analyze_query_with_llm(query: str) -> Dict[str, Any]:
     """
-    Use LLM to analyze the query and detect intents, scenario, and entities.
+    Use LLM to analyze the query and extract key information.
+    
+    This is a TRUE AGENT implementation - LLM reasons about the query
+    without forcing it into predefined scenario categories.
     
     Returns:
-        Dict with keys: intents (list), scenario (str), urgency (str)
+        Dict with keys: intents (list), urgency (str), reasoning (str)
     """
     llm = get_default_llm()
     
@@ -78,33 +81,23 @@ def _analyze_query_with_llm(query: str) -> Dict[str, Any]:
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are a Router Agent in a multi-agent customer service system.
-Your job is to analyze customer queries and determine:
-1. The scenario type (task_allocation, escalation, multi_step, multi_intent, or coordinated)
-2. The intents present in the query
-3. The urgency level (normal or high)
+Your job is to analyze customer queries and extract key information for routing decisions.
 
-IMPORTANT SCENARIO DEFINITIONS:
-- task_allocation: Simple queries requesting customer info or account help with a specific customer ID (e.g., "I need help with my account, customer ID 12345", "Get customer information for ID 5")
-- escalation: (1) Queries with cancellation + billing issues TOGETHER, indicating negotiation needed (e.g., "I want to cancel my subscription but I'm having billing issues"), OR (2) Urgent billing/refund requests requiring immediate attention (e.g., "I've been charged twice, please refund immediately!" - this is escalation because it's urgent and requires special handling)
-- multi_step: Complex queries requiring coordination to fetch data then process (e.g., "What's the status of all high-priority tickets for premium customers?" requires: get premium customers → get their tickets → format report)
-- multi_intent: Queries with multiple parallel tasks that can be done together (e.g., "update email AND show ticket history")
-- coordinated: General support queries requiring data fetch + support response (NOT urgent billing/refund issues)
+You should NOT classify queries into predefined scenarios.
+Instead, reason about:
+1. What the customer is asking for
+2. What information or actions are needed
+3. The urgency level
 
-CRITICAL RULES:
-- If query mentions "cancel" AND "billing" in same sentence → scenario = "escalation" (NOT multi_intent!)
-- If query mentions "charged twice" AND ("refund" OR "immediately") → scenario = "escalation" (urgent billing issue requiring escalation, NOT coordinated!)
-- If query mentions urgent billing/refund requests with high urgency keywords ("immediately", "urgent", "charged twice") → scenario = "escalation"
-- If query asks for "all X for Y" or "show me all X with Y" → scenario = "multi_step" (NOT coordinated!)
-- If query asks for "high-priority tickets for premium customers" → scenario = "multi_step" (requires: get premium customers first, then their tickets)
-- If query mentions "charged twice" or "refund immediately" → urgency = "high" AND scenario = "escalation" (NOT coordinated!)
+CRITICAL: You MUST return ONLY valid JSON. Do NOT include any explanation, analysis, or text before or after the JSON.
 
 Return a JSON object with:
-- intents: array of detected intents (e.g., ["account_help"], ["cancel_subscription", "billing_issue"])
-- scenario: one of the scenario types above (MUST match the definitions exactly)
-- urgency: "normal" or "high"
+- intents: array of what the customer wants (e.g., ["get_customer_info"], ["cancel_subscription", "refund"])
+- urgency: "normal" or "high" (high if words like "immediately", "urgent", "charged twice", "refund now")
+- reasoning: Brief explanation of what the query needs
 
-Be precise about scenario classification based on the query structure and requirements."""),
-        ("user", "Analyze this customer query: {query}")
+Return ONLY the JSON object, nothing else."""),
+        ("user", "Analyze this customer query and return ONLY JSON: {query}")
     ])
     
     parser = JsonOutputParser(pydantic_object=None)
@@ -115,21 +108,162 @@ Be precise about scenario classification based on the query structure and requir
         
         # Ensure required fields exist
         if not isinstance(result, dict):
-            result = {"intents": [], "scenario": "coordinated", "urgency": "normal"}
+            result = {"intents": [], "urgency": "normal", "reasoning": ""}
         
         return {
             "intents": result.get("intents", []),
-            "scenario": result.get("scenario", "coordinated"),
             "urgency": result.get("urgency", "normal"),
+            "reasoning": result.get("reasoning", ""),
         }
     except Exception as e:
+        # Try to extract JSON from raw LLM output
+        print(f"Warning: LLM analysis failed, trying to extract JSON: {e}")
+        try:
+            raw_response = llm.invoke(prompt.format_messages(query=query))
+            raw_text = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+            
+            import json
+            import re
+            # Look for JSON object in the text
+            json_match = re.search(r'\{[^{}]*"intents"[^{}]*\[[^\]]*\][^{}]*\}', raw_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                result = json.loads(json_str)
+                return {
+                    "intents": result.get("intents", []),
+                    "urgency": result.get("urgency", "normal"),
+                    "reasoning": result.get("reasoning", ""),
+                }
+        except:
+            pass
+        
         # Fallback to simple heuristics if LLM fails
-        print(f"Warning: LLM analysis failed, using fallback: {e}")
+        print(f"Warning: JSON extraction failed, using rule-based fallback")
         return _fallback_analysis(query)
 
 
+def _decide_routing_with_llm(query: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Use LLM to decide which agent to call next based on reasoning.
+    
+    This is TRUE AGENT behavior - LLM reasons about what's needed
+    and decides routing dynamically, without hardcoded scenarios.
+    
+    Args:
+        query: The user's query
+        current_state: Current state including customer_id, customer_data, customer_list, tickets
+    
+    Returns:
+        Dict with: next_agent (str), reason (str), needed_data (list)
+    """
+    llm = get_default_llm()
+    
+    if llm is None:
+        # Fallback: simple heuristics
+        if current_state.get("customer_id") and not current_state.get("customer_data"):
+            return {"next_agent": "data_agent", "reason": "Need customer data", "needed_data": ["customer_data"]}
+        return {"next_agent": "data_agent", "reason": "Default routing", "needed_data": []}
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """You are a Router Agent deciding which agent to call next.
+
+Available agents:
+- data_agent: Fetches customer data, lists customers, updates records, gets ticket history via MCP tools
+- support_agent: Generates responses, creates tickets, handles support queries
+
+Your job: Analyze the query and current state, then decide which agent to call next.
+
+CRITICAL: You MUST return ONLY valid JSON. Do NOT include any explanation, analysis, or text before or after the JSON.
+
+Return JSON with these fields:
+- next_agent: either "data_agent" or "support_agent"
+- reason: clear explanation of why this agent should be called next
+- needed_data: list of data we still need before we can answer
+- has_sufficient_data: true or false
+
+Be smart about dependencies - if we need customer data before generating a response, call data_agent first.
+
+Return ONLY the JSON object, nothing else."""),
+        ("user", """Query: {query}
+Current state:
+- customer_id: {customer_id}
+- has_customer_data: {has_customer_data}
+- has_customer_list: {has_customer_list}
+- has_tickets: {has_tickets}
+- intents: {intents}
+
+Return ONLY JSON with next_agent, reason, needed_data, and has_sufficient_data. No explanation.""")
+    ])
+    
+    parser = JsonOutputParser(pydantic_object=None)
+    chain = prompt | llm | parser
+    
+    try:
+        has_customer_data = bool(current_state.get("customer_data") and current_state["customer_data"].get("found"))
+        has_customer_list = bool(current_state.get("customer_list") and len(current_state["customer_list"]) > 0)
+        has_tickets = bool(current_state.get("tickets") and len(current_state["tickets"]) > 0)
+        
+        decision = chain.invoke({
+            "query": query,
+            "customer_id": current_state.get("customer_id"),
+            "has_customer_data": has_customer_data,
+            "has_customer_list": has_customer_list,
+            "has_tickets": has_tickets,
+            "intents": current_state.get("intents", []),
+        })
+        
+        return {
+            "next_agent": decision.get("next_agent", "data_agent"),
+            "reason": decision.get("reason", ""),
+            "needed_data": decision.get("needed_data", []),
+            "has_sufficient_data": decision.get("has_sufficient_data", False),
+        }
+    except Exception as e:
+        print(f"Warning: LLM routing decision failed, trying to extract JSON: {e}")
+        try:
+            has_customer_data = bool(current_state.get("customer_data") and current_state["customer_data"].get("found"))
+            has_customer_list = bool(current_state.get("customer_list") and len(current_state["customer_list"]) > 0)
+            has_tickets = bool(current_state.get("tickets") and len(current_state["tickets"]) > 0)
+            
+            raw_response = llm.invoke(prompt.format_messages(
+                query=query,
+                customer_id=current_state.get("customer_id"),
+                has_customer_data=has_customer_data,
+                has_customer_list=has_customer_list,
+                has_tickets=has_tickets,
+                intents=current_state.get("intents", []),
+            ))
+            raw_text = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+            
+            import json
+            import re
+            # Look for JSON object in the text
+            json_match = re.search(r'\{[^{}]*"next_agent"[^{}]*\}', raw_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                decision = json.loads(json_str)
+                return {
+                    "next_agent": decision.get("next_agent", "data_agent"),
+                    "reason": decision.get("reason", ""),
+                    "needed_data": decision.get("needed_data", []),
+                    "has_sufficient_data": decision.get("has_sufficient_data", False),
+                }
+        except:
+            pass
+        
+        # Fallback routing
+        print(f"Warning: JSON extraction failed, using rule-based fallback")
+        if current_state.get("customer_id") and not current_state.get("customer_data"):
+            return {"next_agent": "data_agent", "reason": "Need customer data", "needed_data": ["customer_data"]}
+        return {"next_agent": "data_agent", "reason": "Default routing", "needed_data": []}
+
+
 def _fallback_analysis(query: str) -> Dict[str, Any]:
-    """Fallback rule-based analysis if LLM fails."""
+    """Fallback rule-based analysis if LLM fails.
+    
+    Note: This is still rule-based, but we don't classify into scenarios anymore.
+    We just extract intents and urgency.
+    """
     q = query.lower()
     intents = []
     
@@ -157,27 +291,12 @@ def _fallback_analysis(query: str) -> Dict[str, Any]:
     if not intents:
         intents.append("general_support")
     
-    # Scenario detection
-    if "high_priority_report" in intents or "active_with_open_tickets" in intents:
-        scenario = "multi_step"
-    elif "cancel_subscription" in intents and "billing_issue" in intents:
-        scenario = "escalation"
-    elif ("charged twice" in q or ("refund" in q and "immediately" in q)) and ("billing_issue" in intents or "refund" in q):
-        # Urgent billing/refund requests should be escalation (NOT coordinated!)
-        scenario = "escalation"
-    elif "simple_customer_info" in intents or "account_help" in intents:
-        scenario = "task_allocation"
-    elif "update_email" in intents and "ticket_history" in intents:
-        scenario = "multi_intent"
-    else:
-        scenario = "coordinated"
-    
     urgency = "high" if ("billing_issue" in intents or "refund immediately" in q or "charged twice" in q) else "normal"
     
     return {
         "intents": intents,
-        "scenario": scenario,
         "urgency": urgency,
+        "reasoning": "Fallback rule-based analysis",
     }
 
 
@@ -185,8 +304,11 @@ def router_node(state: CSState) -> CSState:
     """
     Router node with LLM-powered query analysis.
     
+    TRUE AGENT implementation: Uses LLM to reason about the query,
+    not classify it into predefined scenarios.
+    
     On the first call:
-    - Use LLM to analyze the query and detect intents/scenario
+    - Use LLM to analyze the query and extract intents
     - Extract entities (customer_id, email)
     - Log routing decisions
     - Add messages for A2A compatibility
@@ -194,19 +316,19 @@ def router_node(state: CSState) -> CSState:
     messages = state.get("messages", [])
     logs = state.get("logs", [])
     
-    if "intents" not in state or "scenario" not in state:
+    if "intents" not in state:
         query = state["user_query"]
         
         # Extract entities using regex (more reliable than LLM for structured data)
         customer_id = _extract_customer_id(query)
         new_email = _extract_email(query)
         
-        # Use LLM for intelligent intent detection and scenario classification
+        # Use LLM for intelligent intent detection (no scenario classification)
         llm_analysis = _analyze_query_with_llm(query)
         
         intents = llm_analysis["intents"]
-        scenario = llm_analysis["scenario"]
         urgency = llm_analysis.get("urgency", "normal")
+        reasoning = llm_analysis.get("reasoning", "")
         
         # Override urgency if query contains urgency keywords
         if "refund immediately" in query.lower() or "charged twice" in query.lower():
@@ -215,14 +337,16 @@ def router_node(state: CSState) -> CSState:
         state["customer_id"] = customer_id
         state["new_email"] = new_email
         state["intents"] = intents
-        state["scenario"] = scenario
         state["urgency"] = urgency
         
         # Add message for A2A compatibility
         analysis_msg = (
-            f"Router analyzed query: Scenario={scenario}, "
-            f"intents={intents}, customer_id={customer_id}, urgency={urgency}"
+            f"Router analyzed query: intents={intents}, "
+            f"customer_id={customer_id}, urgency={urgency}"
         )
+        if reasoning:
+            analysis_msg += f", reasoning={reasoning}"
+        
         messages.append({
             "role": "assistant",
             "name": "Router",
@@ -233,13 +357,16 @@ def router_node(state: CSState) -> CSState:
             "sender": "Router",
             "receiver": "Router",
             "content": (
-                f"Parsed query. Scenario={scenario}, intents={intents}, "
+                f"Parsed query. intents={intents}, "
                 f"customer_id={customer_id}, new_email={new_email}, urgency={urgency}"
             )
         })
         
-        # For Scenario 2 (escalation): Log negotiation detection
-        if scenario == "escalation":
+        # For escalation scenarios (cancellation + billing): Add initial negotiation detection
+        has_cancellation = any("cancel" in str(intent).lower() for intent in intents)
+        has_billing = any("billing" in str(intent).lower() or "refund" in str(intent).lower() for intent in intents)
+        if has_cancellation and has_billing:
+            # Scenario 2: Negotiation/Escalation - Router detects multiple intents
             logs.append({
                 "sender": "Router",
                 "receiver": "SupportAgent",

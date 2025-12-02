@@ -14,6 +14,7 @@ based on the scenario and context.
 
 from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 
 from .state import CSState, AgentMessage
 from .mcp_client import (
@@ -29,87 +30,130 @@ def _reason_about_data_needs(state: CSState) -> Dict[str, Any]:
     """
     Use LLM to reason about what data operations are needed.
     
+    TRUE AGENT implementation: LLM reasons directly from the query,
+    not from predefined scenarios.
+    
     Returns:
         Dict with operation details (action, customer_id, filters, etc.)
     """
     llm = get_default_llm()
     
-    scenario = state.get("scenario", "coordinated")
+    if llm is None:
+        # Fallback: simple rule-based logic
+        return {"operations": _determine_operations_rule_based(state)}
+    
     intents = state.get("intents", [])
     customer_id = state.get("customer_id")
     query = state.get("user_query", "")
+    new_email = state.get("new_email")
     
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a Customer Data Agent. Your job is to determine what database operations are needed based on the scenario and intents.
+        ("system", """You are a Customer Data Agent. Your job is to determine what database operations are needed based on the user's query.
 
-Available operations:
-1. get_customer - Fetch a single customer by ID
-2. list_customers - List customers with optional status filter
-3. get_customer_history - Get all tickets for a customer
-4. update_customer - Update customer fields (email, name, phone, status)
+Available MCP operations:
+1. get_customer(customer_id) - Fetch a single customer by ID
+2. list_customers(status, limit) - List customers with optional status filter (e.g., "active", "inactive")
+3. get_customer_history(customer_id) - Get all tickets for a customer
+4. update_customer(customer_id, data) - Update customer fields (email, name, phone, status)
 
-Based on the scenario and intents, determine what operations are needed. Return a JSON object with:
+IMPORTANT CONTEXT MAPPINGS:
+- "premium customers" = customers with status="active"
+- "active customers" = customers with status="active"
+- "inactive customers" = customers with status="inactive" or "disabled"
+- When query asks for "premium customers" or "active customers", you MUST use list_customers with filters: {{"status": "active"}}
+
+CRITICAL: You MUST return ONLY valid JSON. Do NOT include any explanation, analysis, or text before or after the JSON.
+
+Return a JSON object with:
 - operations: array of operation objects, each with:
-  - action: one of the operations above
-  - customer_id: if needed (from context or query)
-  - filters: any filters needed (status, etc.)
+  - action: one of "get_customer", "list_customers", "get_customer_history", "update_customer"
+  - customer_id: if needed (integer or None)
+  - filters: dict with filters (e.g., {{"status": "active"}}) if needed
+  - update_data: dict with fields to update (e.g., {{"email": "new@email.com"}}) if needed
 
-Be intelligent about what data is actually needed for the scenario."""),
-        ("user", """Scenario: {scenario}
+CRITICAL: If the query asks for "premium customers" or "active customers", you MUST include a list_customers operation with filters: {{"status": "active"}}
+
+Return ONLY the JSON object, nothing else."""),
+        ("user", """Query: {query}
 Intents: {intents}
-Customer ID: {customer_id}
-Query: {query}
+Customer ID from context: {customer_id}
+New email from context: {new_email}
 
-What data operations are needed?""")
+Return ONLY a JSON object with the operations array. No explanation, no analysis, just JSON.""")
     ])
     
-    try:
-        response = llm.invoke(prompt.format_messages(
-            scenario=scenario,
-            intents=str(intents),
-            customer_id=str(customer_id),
-            query=query
-        ))
-        
-        # Parse LLM response (simplified - in production, use structured output)
-        content = response.content if hasattr(response, 'content') else str(response)
-        
-        # For now, use rule-based logic but with LLM guidance
-        # In a full implementation, parse JSON from LLM response
-        return {
-            "operations": _determine_operations_rule_based(scenario, intents, customer_id, query)
-        }
-    except Exception as e:
-        print(f"Warning: LLM reasoning failed, using rule-based: {e}")
-        return {
-            "operations": _determine_operations_rule_based(scenario, intents, customer_id, query)
-        }
-
-
-def _determine_operations_rule_based(scenario: str, intents: list, customer_id: Any, query: str = "") -> list:
-    """Rule-based operation determination (fallback)."""
-    operations = []
-    query_lower = query.lower() if query else ""
+    parser = JsonOutputParser(pydantic_object=None)
+    chain = prompt | llm | parser
     
-    if scenario == "task_allocation" and customer_id:
+    try:
+        result = chain.invoke({
+            "query": query,
+            "intents": intents,
+            "customer_id": customer_id,
+            "new_email": new_email,
+        })
+        
+        operations = result.get("operations", [])
+        if not operations:
+            # Fallback if LLM returns no operations
+            return {"operations": _determine_operations_rule_based(state)}
+        
+        return {"operations": operations}
+    except Exception as e:
+        # Try to extract JSON from the error message or raw LLM output
+        print(f"Warning: LLM reasoning failed, trying to extract JSON: {e}")
+        try:
+            # Try calling LLM directly and extract JSON from response
+            raw_response = llm.invoke(prompt.format_messages(
+                query=query,
+                intents=intents,
+                customer_id=customer_id,
+                new_email=new_email,
+            ))
+            raw_text = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+            
+            # Try to extract JSON from the text
+            import json
+            import re
+            # Look for JSON object in the text
+            json_match = re.search(r'\{[^{}]*"operations"[^{}]*\[[^\]]*\][^{}]*\}', raw_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                result = json.loads(json_str)
+                operations = result.get("operations", [])
+                if operations:
+                    return {"operations": operations}
+        except:
+            pass
+        
+        # Final fallback
+        print(f"Warning: JSON extraction failed, using rule-based fallback")
+        return {"operations": _determine_operations_rule_based(state)}
+
+
+def _determine_operations_rule_based(state: CSState) -> list:
+    """Rule-based operation determination (fallback when LLM unavailable)."""
+    operations = []
+    query = state.get("user_query", "").lower()
+    intents = state.get("intents", [])
+    customer_id = state.get("customer_id")
+    new_email = state.get("new_email")
+    
+    # Simple heuristics (fallback only)
+    if customer_id and ("get customer" in query or "customer info" in query or "account" in query):
         operations.append({"action": "get_customer", "customer_id": customer_id})
     
-    elif scenario == "multi_step":
-        # For multi_step, determine what data is needed
-        if "premium" in query_lower:
-            # Need to get premium customers (in our system, active = premium)
-            operations.append({"action": "list_customers", "filters": {"status": "active"}})
-        else:
-            # Default: get active customers
-            operations.append({"action": "list_customers", "filters": {"status": "active"}})
+    if "premium" in query or "active customers" in query:
+        operations.append({"action": "list_customers", "filters": {"status": "active"}})
     
-    elif scenario == "multi_intent":
-        if "update_email" in intents and customer_id:
-            operations.append({"action": "update_customer", "customer_id": customer_id})
-        if "ticket_history" in intents and customer_id:
-            operations.append({"action": "get_customer_history", "customer_id": customer_id})
+    if "ticket history" in query or "ticket" in query and customer_id:
+        operations.append({"action": "get_customer_history", "customer_id": customer_id})
     
-    elif scenario in ["coordinated", "escalation"] and customer_id:
+    if "update" in query and "email" in query and customer_id and new_email:
+        operations.append({"action": "update_customer", "customer_id": customer_id, "update_data": {"email": new_email}})
+    
+    if not operations and customer_id:
+        # Default: get customer if we have an ID
         operations.append({"action": "get_customer", "customer_id": customer_id})
     
     return operations
@@ -119,11 +163,11 @@ def data_agent_node(state: CSState) -> CSState:
     """
     Data agent node with LLM-powered reasoning about data needs.
     
-    Uses LLM to determine what data operations are needed, then executes them.
+    TRUE AGENT implementation: Uses LLM to reason about what data operations
+    are needed from the query, then executes them.
     """
     messages = state.get("messages", [])
     logs = state.get("logs", [])
-    scenario = state.get("scenario", "coordinated")
     intents = state.get("intents", [])
     customer_id = state.get("customer_id")
     
@@ -218,35 +262,8 @@ def data_agent_node(state: CSState) -> CSState:
                     "content": msg_content
                 })
     
-    # Legacy rule-based logic for backward compatibility
-    if scenario == "task_allocation" and customer_id and "customer_data" not in state:
-        customer = mcp_get_customer(customer_id)
-        state["customer_data"] = customer
-        if customer.get("found") and customer.get("status") == "active":
-            state["customer_tier"] = "premium"
-        elif customer.get("found"):
-            state["customer_tier"] = "standard"
-    
-    if scenario == "multi_step" and "customer_list" not in state:
-        customers = mcp_list_customers(status="active", limit=200)
-        state["customer_list"] = customers
-        msg_content = f"Fetched {len(customers)} active customers for multi-step report."
-        messages.append({
-            "role": "assistant",
-            "name": "CustomerDataAgent",
-            "content": msg_content
-        })
-    
-    if scenario == "multi_intent" and customer_id:
-        if "update_email" in intents and state.get("new_email"):
-            mcp_update_customer(customer_id, {"email": state["new_email"]})
-        if "ticket_history" in intents:
-            history = mcp_get_customer_history(customer_id)
-            state["tickets"] = history
-    
-    if scenario in ["coordinated", "escalation"] and customer_id and "customer_data" not in state:
-        customer = mcp_get_customer(customer_id)
-        state["customer_data"] = customer
+    # All operations are now handled by LLM reasoning above
+    # No legacy scenario-based logic needed
     
     state["messages"] = messages
     state["logs"] = logs

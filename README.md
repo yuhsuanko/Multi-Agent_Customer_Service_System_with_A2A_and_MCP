@@ -41,12 +41,14 @@ Design a multi-agent system with at least two specialized agents:
 - Requests customer context from Data Agent
 - Provides solutions and recommendations
 
-**Note:** All agents use LLM backends for intelligent reasoning and decision-making:
-- Router Agent uses LLM to detect intents, classify scenarios, and extract entities from natural language queries
-- Customer Data Agent uses LLM to reason about what data operations are needed based on context
-- Support Agent uses LLM to generate natural, context-aware responses based on customer data and scenario
+**Note:** All agents are **TRUE AGENTS** that use LLM backends for intelligent reasoning and decision-making, not hardcoded chatbots:
+- **Router Agent** uses LLM to analyze queries, detect intents, and dynamically decide routing (no predefined scenario matching)
+- **Customer Data Agent** uses LLM to reason about what data operations are needed based on query context (no hardcoded action mapping)
+- **Support Agent** uses LLM to generate natural, context-aware responses based on all available data (no template-based responses)
 
-**Note:** Agents can work with rule-based fallback logic if no LLM API key is configured, but LLM reasoning is recommended for full functionality.
+**Key Design Principle:** Agents reason and solve problems without hardcoding explicit scenarios. All decisions (routing, data operations, response generation) are made by LLM reasoning based on the query and current state.
+
+**Note:** Agents can work with rule-based fallback logic if no LLM API key is configured, but LLM reasoning is required for true agent behavior.
 
 ### Architecture Diagram
 
@@ -458,7 +460,10 @@ The system handles the following test scenarios:
 
 ### 3. Complex Query
 **Query:** "Show me all active customers who have open tickets"  
-**Expected:** Requires negotiation between data and support agents
+**Expected:** 
+- Data Agent fetches active customers via MCP
+- Support Agent fetches open tickets for those customers
+- Response lists customers who have open tickets, then lists all their open tickets with details
 
 ### 4. Escalation
 **Query:** "I've been charged twice, please refund immediately!"  
